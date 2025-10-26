@@ -1,0 +1,75 @@
+[gd_scene load_steps=7 format=3 uid="uid://gxv8ypoerbsn"]
+
+[ext_resource type="PackedScene" path="res://objects/Gameplay/Common/HQ_PlayerSpawner.tscn" id="1_7itrm"]
+[ext_resource type="PackedScene" uid="uid://jv31so3xcr7p" path="res://addons/bf_portal/portal_tools/types/PolygonVolume/PolygonVolume.tscn" id="2_n043p"]
+[ext_resource type="PackedScene" path="res://objects/entities/SpawnPoint.tscn" id="3_kc8mn"]
+[ext_resource type="PackedScene" path="res://objects/Gameplay/Common/CombatArea.tscn" id="4_6msqd"]
+[ext_resource type="PackedScene" path="res://static/MP_FireStorm_Terrain.tscn" id="5_8hnvq"]
+[ext_resource type="PackedScene" path="res://static/MP_FireStorm_Assets.tscn" id="6_t2i43"]
+
+[node name="MP_FireStorm" type="Node3D"]
+
+[node name="TEAM_1_HQ" parent="." node_paths=PackedStringArray("HQArea", "InfantrySpawns") instance=ExtResource("1_7itrm")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -116.135, 125.005, -97.8111)
+AltTeam = 0
+ObjId = 1
+HQArea = NodePath("HQ_Team1")
+InfantrySpawns = [NodePath("SpawnPoint_1_1"), NodePath("SpawnPoint_1_2"), NodePath("SpawnPoint_1_3"), NodePath("SpawnPoint_1_4")]
+
+[node name="HQ_Team1" parent="TEAM_1_HQ" instance=ExtResource("2_n043p")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.5, 0)
+points = PackedVector2Array(5, 5, 5, -5, -5, -5, -5, 5)
+
+[node name="SpawnPoint_1_1" parent="TEAM_1_HQ" instance=ExtResource("3_kc8mn")]
+transform = Transform3D(0.999884, 0, -0.0152535, 0, 1, 0, 0.0152535, 0, 0.999884, 0, 0, -3)
+
+[node name="SpawnPoint_1_2" parent="TEAM_1_HQ" instance=ExtResource("3_kc8mn")]
+transform = Transform3D(-0.9995, 0, -0.0316198, 0, 1, 0, 0.0316198, 0, -0.9995, 3, 0, 0)
+
+[node name="SpawnPoint_1_3" parent="TEAM_1_HQ" instance=ExtResource("3_kc8mn")]
+transform = Transform3D(-0.0428871, 0, 0.99908, 0, 1, 0, -0.99908, 0, -0.0428871, -3, 0, 0)
+
+[node name="SpawnPoint_1_4" parent="TEAM_1_HQ" instance=ExtResource("3_kc8mn")]
+transform = Transform3D(0.0841819, 0, -0.99645, 0, 1, 0, 0.99645, 0, 0.0841819, 0, 0, 3)
+
+[node name="TEAM_2_HQ" parent="." node_paths=PackedStringArray("HQArea", "InfantrySpawns") instance=ExtResource("1_7itrm")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -84.1766, 135.338, -82.7109)
+Team = 2
+AltTeam = 0
+ObjId = 2
+HQArea = NodePath("HQ_Team2")
+InfantrySpawns = [NodePath("SpawnPoint_2_1"), NodePath("SpawnPoint_2_2"), NodePath("SpawnPoint_2_3"), NodePath("SpawnPoint_2_4")]
+
+[node name="HQ_Team2" parent="TEAM_2_HQ" instance=ExtResource("2_n043p")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.5, 0)
+points = PackedVector2Array(5, 5, 5, -5, -5, -5, -5, 5)
+
+[node name="SpawnPoint_2_1" parent="TEAM_2_HQ" instance=ExtResource("3_kc8mn")]
+transform = Transform3D(-0.65519, 0, -0.755465, 0, 1, 0, 0.755465, 0, -0.65519, 16.5092, 0, 20.3317)
+
+[node name="SpawnPoint_2_2" parent="TEAM_2_HQ" instance=ExtResource("3_kc8mn")]
+transform = Transform3D(-0.997604, 0, 0.0691822, 0, 1, 0, -0.0691822, 0, -0.997604, -23.7407, -0.0106506, -39.9691)
+
+[node name="SpawnPoint_2_3" parent="TEAM_2_HQ" instance=ExtResource("3_kc8mn")]
+transform = Transform3D(0.99484, 0, 0.101455, 0, 1, 0, -0.101455, 0, 0.99484, -54.3456, -0.088501, 13.7502)
+
+[node name="SpawnPoint_2_4" parent="TEAM_2_HQ" instance=ExtResource("3_kc8mn")]
+transform = Transform3D(0.987745, 0, -0.156073, 0, 1, 0, 0.156073, 0, 0.987745, -70.4142, -10.3325, -44.2435)
+
+[node name="CombatArea" parent="." node_paths=PackedStringArray("CombatVolume") instance=ExtResource("4_6msqd")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -115.812, 93.4144, -100.432)
+CombatVolume = NodePath("CollisionPolygon3D")
+
+[node name="CollisionPolygon3D" parent="CombatArea" instance=ExtResource("2_n043p")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 25, 0)
+points = PackedVector2Array(67, 95, 67, -90, -65, -90, -65, 95)
+height = 100.0
+
+[node name="Static" type="Node3D" parent="."]
+
+[node name="MP_FireStorm_Terrain" parent="Static" instance=ExtResource("5_8hnvq")]
+
+[node name="MP_FireStorm_Assets" parent="Static" instance=ExtResource("6_t2i43")]
+
+[editable path="Static/MP_FireStorm_Terrain"]
+[editable path="Static/MP_FireStorm_Terrain/Mesh"]

@@ -1,0 +1,15 @@
+{
+  "SurvivorCount": "Survivors: {}",
+  "InfectedCount": "Infected: {}",
+  "InfectedTimermmss": "{}:{}",
+  "InfectedTimermm0s": "{}:0{}",
+  "InfectedTimer0mss": "0{}:{}",
+  "InfectedTimer0m0s": "0{}:0{}",
+  "preRoundStart": "Round Starting",
+  "countdownStart": "Countdown Started",
+  "inProgressStart": "Stay alive or infect the survivors!",
+  "roundEndStart": "Round ended",
+  "Survivors": "Survivors",
+  "Infected": "Infected",
+  "Eliminations": "Eliminations"
+}
