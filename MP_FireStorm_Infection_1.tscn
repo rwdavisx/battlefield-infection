@@ -1,4 +1,4 @@
-[gd_scene load_steps=7 format=3 uid="uid://gxv8ypoerbsn"]
+[gd_scene load_steps=10 format=3 uid="uid://gxv8ypoerbsn"]
 
 [ext_resource type="PackedScene" path="res://objects/Gameplay/Common/HQ_PlayerSpawner.tscn" id="1_7itrm"]
 [ext_resource type="PackedScene" uid="uid://jv31so3xcr7p" path="res://addons/bf_portal/portal_tools/types/PolygonVolume/PolygonVolume.tscn" id="2_n043p"]
@@ -6,6 +6,9 @@
 [ext_resource type="PackedScene" path="res://objects/Gameplay/Common/CombatArea.tscn" id="4_6msqd"]
 [ext_resource type="PackedScene" path="res://static/MP_FireStorm_Terrain.tscn" id="5_8hnvq"]
 [ext_resource type="PackedScene" path="res://static/MP_FireStorm_Assets.tscn" id="6_t2i43"]
+[ext_resource type="PackedScene" path="res://objects/Gameplay/AI/AI_Spawner.tscn" id="7_n043p"]
+[ext_resource type="PackedScene" path="res://objects/Gameplay/Common/DeployCam.tscn" id="8_6msqd"]
+[ext_resource type="PackedScene" path="res://objects/Gameplay/Common/Sector.tscn" id="9_8hnvq"]
 
 [node name="MP_FireStorm" type="Node3D"]
 
@@ -70,6 +73,19 @@ height = 100.0
 [node name="MP_FireStorm_Terrain" parent="Static" instance=ExtResource("5_8hnvq")]
 
 [node name="MP_FireStorm_Assets" parent="Static" instance=ExtResource("6_t2i43")]
+
+[node name="AI_Spawner" parent="." instance=ExtResource("7_n043p")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -130.991, 125.069, -101.179)
+ObjId = 101
+
+[node name="DeployCam" parent="." instance=ExtResource("8_6msqd")]
+transform = Transform3D(1, 0, 0, 0, -4.37114e-08, 1, 0, -1, -4.37114e-08, -116.207, 313.341, -91.1765)
+
+[node name="Sector" parent="." node_paths=PackedStringArray("SectorArea") instance=ExtResource("9_8hnvq")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -117.538, 125.193, -90.7856)
+ObjId = 201
+AutoEnableVehicles = false
+SectorArea = NodePath("../CombatArea/CollisionPolygon3D")
 
 [editable path="Static/MP_FireStorm_Terrain"]
 [editable path="Static/MP_FireStorm_Terrain/Mesh"]

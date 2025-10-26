@@ -1,5 +1,37 @@
 import * as modlib from 'modlib';
 
+const DEV_BUILD = {
+    ENABLED: false,
+    BOTS: 1,
+    SPAWNER_ID: 101
+}
+
+const INFECTION_CFG = {
+    GAMEMODE: {
+        MINIMUM_PLAYERS: 2,
+        INITIAL_INFECTED_COUNT: 1,
+        NUM_OF_ROUNDS: 5,
+        PRE_ROUND_SECONDS: 5,
+        COUNTDOWN_SECONDS: 10,
+        ROUND_SECONDS: 300,
+        ROUND_END_SECONDS: 15
+    },
+    LOADOUTS: {
+        ALLOWED_WEAPONS_INFECTED: [],
+        ALLOWED_GADGETS_INFECTED: [
+            mod.Gadgets.Melee_Combat_Knife,
+            mod.Gadgets.Throwable_Throwing_Knife
+        ],
+        ALLOWED_WEAPONS_SURVIVORS: [
+            mod.Weapons.Shotgun_M1014
+        ],
+        ALLOWED_GADGETS_SURVIVORS: [
+            mod.Gadgets.Melee_Combat_Knife
+        ],
+        NUM_INFECTED_THROWING_KNIVES: 3
+    }
+}
+
 enum InfectedTeam {
     SURVIVORS = 1,
     INFECTED = 2
@@ -20,19 +52,12 @@ export async function OnGameModeStarted() {
 }
 
 export async function OnPlayerJoinGame(eventPlayer: mod.Player) {
-    if (!mod.IsPlayerValid(eventPlayer)) return;
+    gameState.initializePlayer(eventPlayer)
+}
 
-    const player = new InfectionPlayer(eventPlayer);
-
-    if (gameState.gameStarted) {
-        if (gameState.matchStatus === MatchStatus.IN_PROGRESS || gameState.matchStatus === MatchStatus.ROUND_END) {
-            player.becomeInfected()
-        } else {
-            player.becomeSurvivor()
-        }
-    }
-
-    logger.log(`Player ${player.playerId} joined!`)
+export function OnSpawnerSpawned(eventPlayer: mod.Player, eventSpawner: mod.Spawner) {
+    gameState.initializePlayer(eventPlayer)
+    console.log(`Spawned bot ${mod.GetObjId(eventPlayer)}`)
 }
 
 export function OnPlayerLeaveGame(eventNumber: number) {
@@ -48,14 +73,9 @@ export async function OnPlayerDeployed(eventPlayer: mod.Player) {
 
     p.isDeployed = true;
 
-    if (p.team === InfectedTeam.INFECTED) {
-        mod.AddEquipment(p.player, mod.Gadgets.Melee_Combat_Knife)
-    } else {
-        mod.AddEquipment(p.player, mod.Weapons.Shotgun_M1014)
-        mod.AddEquipment(p.player, mod.Gadgets.Melee_Combat_Knife)
-    }
+    LoadoutManager.giveLoadout(p)
 
-    logger.log(`Player ${mod.GetObjId(eventPlayer)} deployed with loadout.`)
+    logger.log(`Player ${mod.GetObjId(eventPlayer)} deployed`)
 }
 
 export function OnPlayerUndeploy(eventPlayer: mod.Player) {
@@ -70,7 +90,7 @@ export async function OnPlayerDied(victimP: mod.Player, killerP: mod.Player) {
     const killer = gameState.players.get(mod.GetObjId(killerP));
     if (!victim || !killer) return;
 
-    await mod.Wait(3);
+    await mod.Wait(2);
 
     if (gameState.matchStatus === MatchStatus.IN_PROGRESS && victim.team === InfectedTeam.SURVIVORS) {
         victim.becomeInfected();
@@ -114,6 +134,7 @@ class InfectionPlayer {
         this.perks = { survivor: {}, infected: {} };
         mod.SetRedeployTime(eventPlayer, 0);
         gameState.players.set(this.playerId, this);
+        this.restrictLoadouts();
     }
 
     get maxHealth() {
@@ -132,12 +153,23 @@ class InfectionPlayer {
         return mod.GetSoldierState(this.player, mod.SoldierStateBool.IsAISoldier)
     }
 
+    async restrictLoadouts() {
+        while (true) {
+            await mod.Wait(1);
+            if (!gameState.gameStarted) continue;
+            if (mod.IsPlayerValid(this.player)) continue;
+
+            LoadoutManager.restrictWeapons(this)
+            LoadoutManager.restrictGadgets(this)
+        }
+    }
+
     async becomeInfected() {
         this.team = InfectedTeam.INFECTED;
 
         if (this.isDeployed) {
             mod.UndeployPlayer(this.player)
-            await mod.Wait(0.1)
+            await mod.Wait(0.5)
         }
 
         if (mod.GetObjId(mod.GetTeam(this.player)) !== this.team) {
@@ -147,8 +179,7 @@ class InfectionPlayer {
         gameState.infected.set(this.playerId, this);
         gameState.survivors.delete(this.playerId);
 
-        mod.DeployPlayer(this.player)
-        // mod.SetPlayerMovementSpeedMultiplier(this.player, 1.25)
+        // mod.DeployPlayer(this.player)
 
         logger.log(`Player ${this.playerId} initialized as Infected!`)
     }
@@ -158,7 +189,7 @@ class InfectionPlayer {
 
         if (this.isDeployed) {
             mod.UndeployPlayer(this.player)
-            await mod.Wait(0.1)
+            await mod.Wait(0.5)
         }
 
         if (mod.GetObjId(mod.GetTeam(this.player)) !== this.team) {
@@ -168,11 +199,70 @@ class InfectionPlayer {
         gameState.survivors.set(this.playerId, this);
         gameState.infected.delete(this.playerId);
 
-        mod.DeployPlayer(this.player)
+        // mod.DeployPlayer(this.player)
         // mod.SetPlayerMovementSpeedMultiplier(this.player, 1.1)
 
         logger.log(`Player ${this.playerId} initialized as Survivor!`)
     }
+}
+
+class LoadoutManager {
+    static allowedWeaponsInfected: mod.Weapons[] = INFECTION_CFG.LOADOUTS.ALLOWED_WEAPONS_INFECTED;
+    static allowedGadgetsInfected: mod.Gadgets[] = INFECTION_CFG.LOADOUTS.ALLOWED_GADGETS_INFECTED
+    static allowedWeaponsSurvivors: mod.Weapons[] = INFECTION_CFG.LOADOUTS.ALLOWED_WEAPONS_SURVIVORS
+    static allowedGadgetsSurvivors: mod.Gadgets[] = INFECTION_CFG.LOADOUTS.ALLOWED_GADGETS_SURVIVORS
+    static infectedThrowableKnives: number = INFECTION_CFG.LOADOUTS.NUM_INFECTED_THROWING_KNIVES - 1
+
+    private static enumValues<E extends Record<string, string | number>>(e: E): (E[keyof E])[] {
+        return Object.values(e).filter((v) => typeof v === "number") as (E[keyof E])[];
+    }
+
+    static restrictWeapons(player: InfectionPlayer) {
+        const allWeapons = this.enumValues(mod.Weapons);
+        const allowed = player.team === InfectedTeam.INFECTED
+            ? this.allowedWeaponsInfected
+            : this.allowedWeaponsSurvivors;
+
+        for (const weapon of allWeapons) {
+            const has = mod.HasEquipment(player.player, weapon);
+            if (has && !allowed.includes(weapon)) {
+                mod.RemoveEquipment(player.player, weapon);
+                logger.log(`Removed ${mod.Weapons[weapon]} from ${player.playerId}`);
+            }
+        }
+    }
+
+    static restrictGadgets(player: InfectionPlayer) {
+        const allGadgets = this.enumValues(mod.Gadgets);
+        const allowed = player.team === InfectedTeam.INFECTED
+            ? this.allowedGadgetsInfected
+            : this.allowedGadgetsSurvivors;
+
+        for (const gadget of allGadgets) {
+            const has = mod.HasEquipment(player.player, gadget);
+            if (has && !allowed.includes(gadget)) {
+                mod.RemoveEquipment(player.player, gadget);
+                logger.log(`Removed ${mod.Gadgets[gadget]} from ${player.playerId}`);
+            }
+        }
+    }
+
+    static giveLoadout(player: InfectionPlayer) {
+        if (player.team === InfectedTeam.INFECTED) {
+            mod.AddEquipment(player.player, mod.Gadgets.Melee_Combat_Knife);
+            mod.AddEquipment(player.player, mod.Gadgets.Throwable_Throwing_Knife);
+            mod.SetInventoryAmmo(player.player, mod.InventorySlots.Throwable, LoadoutManager.infectedThrowableKnives)
+        } else {
+            mod.AddEquipment(player.player, mod.Weapons.Shotgun_M1014);
+            mod.AddEquipment(player.player, mod.Gadgets.Melee_Combat_Knife);
+        }
+
+        logger.log(`Gave ${player.team === InfectedTeam.INFECTED ? "Infected" : "Survivor"} loadout to ${player.playerId}`);
+    }
+}
+
+class ScoreboardManager {
+
 }
 
 class BFI_UIInfectedCount {
@@ -422,7 +512,6 @@ class BFI_UIMatchTimer {
 
 class InfectionGameState {
     static Instance = new InfectionGameState();
-    sequence: number = 0;
     gameStarted = false;
     pointInTime: number = 0;
     phaseWait: boolean = false;
@@ -432,16 +521,16 @@ class InfectionGameState {
     infected: Map<number, InfectionPlayer> = new Map<number, InfectionPlayer>();
 
     matchStatus: MatchStatus = MatchStatus.LOBBY;
-    minPlayersToStart: number = 1
-    initialInfectedCount: number = 1
+    minPlayersToStart: number = INFECTION_CFG.GAMEMODE.MINIMUM_PLAYERS
+    initialInfectedCount: number = INFECTION_CFG.GAMEMODE.INITIAL_INFECTED_COUNT
 
-    numberOfRounds: number = 5
-    preRoundSeconds: number = 15
-    countdownSeconds: number = 30
-    roundSeconds: number = 300
-    roundEndSeconds: number = 15
+    numberOfRounds: number = INFECTION_CFG.GAMEMODE.NUM_OF_ROUNDS
+    preRoundSeconds: number = INFECTION_CFG.GAMEMODE.PRE_ROUND_SECONDS
+    countdownSeconds: number = INFECTION_CFG.GAMEMODE.COUNTDOWN_SECONDS
+    roundSeconds: number = INFECTION_CFG.GAMEMODE.ROUND_SECONDS
+    roundEndSeconds: number = INFECTION_CFG.GAMEMODE.ROUND_END_SECONDS
+
     phaseSeconds: number = 0
-
     currentRound: number = 0
     survivorWinCount: number = 0
     infectedWinCount: number = 0
@@ -462,7 +551,17 @@ class InfectionGameState {
     initGameState() {
         mod.SetSpawnMode(mod.SpawnModes.Deploy)
         this.initScoreboard();
+
+        if (DEV_BUILD.ENABLED) this.spawnAI()
+
         this.mainGameLoop();
+    }
+
+    async spawnAI() {
+        for (let i = 0; i < DEV_BUILD.BOTS; i++) {
+            mod.SpawnAIFromAISpawner(mod.GetSpawner(DEV_BUILD.SPAWNER_ID), mod.SoldierClass.Recon, mod.GetTeam(1))
+            await mod.Wait(0.1)
+        }
     }
 
     phaseTimer(phaseTime: number, nextPhase: MatchStatus) {
@@ -481,6 +580,22 @@ class InfectionGameState {
     updateUI() {
         this.InfectedCountUI.Update(gameState.survivors.size, gameState.infected.size);
         this.InfectedTimerUI.Update();
+    }
+
+    initializePlayer(eventPlayer: mod.Player) {
+        if (!mod.IsPlayerValid(eventPlayer)) return;
+
+        const player = new InfectionPlayer(eventPlayer);
+
+        if (gameState.gameStarted) {
+            if (gameState.matchStatus === MatchStatus.IN_PROGRESS || gameState.matchStatus === MatchStatus.ROUND_END) {
+                player.becomeInfected()
+            } else {
+                player.becomeSurvivor()
+            }
+        }
+
+        logger.log(`Player ${player.playerId} joined!`)
     }
 
     async mainGameLoop() {
@@ -538,7 +653,7 @@ class InfectionGameState {
             this.matchStatus = MatchStatus.COUNTDOWN;
             this.pointInTime = mod.GetMatchTimeElapsed();
             this.phaseSeconds = this.countdownSeconds
-
+            mod.DeployAllPlayers()
         }
 
         this.phaseTimer(this.countdownSeconds, MatchStatus.IN_PROGRESS)
@@ -580,14 +695,17 @@ class InfectionGameState {
         if (!this.phaseWait) {
             this.phaseWait = true
             logger.log(`Round Ended Handler`)
-            mod.DisplayNotificationMessage(mod.Message("roundEndStart"))
             this.matchStatus = MatchStatus.ROUND_END;
             this.pointInTime = mod.GetMatchTimeElapsed();
             this.phaseSeconds = this.roundEndSeconds
             if (this.survivors.size > 0) {
                 this.survivorWinCount++;
+                logger.log(`Survivors Win!`)
+                mod.DisplayNotificationMessage(mod.Message("roundEndStartSurvivors"))
             } else {
                 this.infectedWinCount++;
+                logger.log(`Infected Win!`)
+                mod.DisplayNotificationMessage(mod.Message("roundEndStartInfected"))
             }
         }
         this.phaseTimer(this.roundEndSeconds, (this.currentRound >= this.numberOfRounds) ? MatchStatus.GAME_END : MatchStatus.PRE_ROUND)
@@ -628,8 +746,12 @@ const gameState = InfectionGameState.Instance
 
 const logger = DebugLog.Logger
 
-
-// Fix spawn points
-// Let attackers pick gun class
-// Let infected deploy anywhere
-// game stopped around 2:25???
+// MORE SPAWNS (4)
+// IMPLEMENT SCOREBOARD
+// ALLOW PICKING GUNS (2)
+// FIX SELECTION BUG (1)
+// FIX DEPLOYING AS SURVIVOR AFTER MATCH STARTS (3)
+// DISCORD LINK
+// ALPHA ZOMBIE
+// lAST SURVIVOR
+// fIX WHO WINS

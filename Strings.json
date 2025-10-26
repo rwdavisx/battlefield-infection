@@ -8,7 +8,8 @@
   "preRoundStart": "Round Starting",
   "countdownStart": "Countdown Started",
   "inProgressStart": "Stay alive or infect the survivors!",
-  "roundEndStart": "Round ended",
+  "roundEndStartSurvivors": "Survivors win the round!",
+  "roundEndStartInfected": "Infected win the round!",
   "Survivors": "Survivors",
   "Infected": "Infected",
   "Eliminations": "Eliminations"

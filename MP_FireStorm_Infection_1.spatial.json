@@ -389,6 +389,88 @@
                     "z": -5.432
                 }
             ]
+        },
+        {
+            "name": "AI_Spawner",
+            "ObjId": 101,
+            "type": "AI_Spawner",
+            "right": {
+                "x": 1,
+                "y": 0,
+                "z": 0
+            },
+            "up": {
+                "x": 0,
+                "y": 1,
+                "z": 0
+            },
+            "front": {
+                "x": 0,
+                "y": 0,
+                "z": 1
+            },
+            "position": {
+                "x": -130.991,
+                "y": 125.069,
+                "z": -101.179
+            },
+            "id": "AI_Spawner"
+        },
+        {
+            "name": "DeployCam",
+            "type": "DeployCam",
+            "right": {
+                "x": 1,
+                "y": 0,
+                "z": 0
+            },
+            "up": {
+                "x": 0,
+                "y": -4.37114e-08,
+                "z": -1
+            },
+            "front": {
+                "x": 0,
+                "y": 1,
+                "z": -4.37114e-08
+            },
+            "position": {
+                "x": -116.207,
+                "y": 313.341,
+                "z": -91.1765
+            },
+            "id": "DeployCam"
+        },
+        {
+            "name": "Sector",
+            "ObjId": 201,
+            "AutoEnableVehicles": false,
+            "SectorArea": "CombatArea/CollisionPolygon3D",
+            "type": "Sector",
+            "right": {
+                "x": 1,
+                "y": 0,
+                "z": 0
+            },
+            "up": {
+                "x": 0,
+                "y": 1,
+                "z": 0
+            },
+            "front": {
+                "x": 0,
+                "y": 0,
+                "z": 1
+            },
+            "position": {
+                "x": -117.538,
+                "y": 125.193,
+                "z": -90.7856
+            },
+            "id": "Sector",
+            "linked": [
+                "SectorArea"
+            ]
         }
     ],
     "Static": [
