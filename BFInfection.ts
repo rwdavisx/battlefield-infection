@@ -1,8 +1,8 @@
 import * as modlib from 'modlib';
 
 const DEV_BUILD = {
-    ENABLED: false,
-    BOTS: 1,
+    ENABLED: true,
+    BOTS: 5,
     SPAWNER_ID: 101
 }
 
@@ -23,10 +23,100 @@ const INFECTION_CFG = {
             mod.Gadgets.Throwable_Throwing_Knife
         ],
         ALLOWED_WEAPONS_SURVIVORS: [
-            mod.Weapons.Shotgun_M1014
+            mod.Weapons.AssaultRifle_AK4D,
+            mod.Weapons.AssaultRifle_B36A4,
+            mod.Weapons.AssaultRifle_KORD_6P67,
+            mod.Weapons.AssaultRifle_L85A3,
+            mod.Weapons.AssaultRifle_M433,
+            mod.Weapons.AssaultRifle_NVO_228E,
+            mod.Weapons.AssaultRifle_SOR_556_Mk2,
+            mod.Weapons.AssaultRifle_TR_7,
+            mod.Weapons.Carbine_AK_205,
+            mod.Weapons.Carbine_GRT_BC,
+            mod.Weapons.Carbine_M277,
+            mod.Weapons.Carbine_M417_A2,
+            mod.Weapons.Carbine_M4A1,
+            mod.Weapons.Carbine_QBZ_192,
+            mod.Weapons.Carbine_SG_553R,
+            mod.Weapons.DMR_LMR27,
+            mod.Weapons.DMR_M39_EMR,
+            mod.Weapons.DMR_SVDM,
+            mod.Weapons.DMR_SVK_86,
+            mod.Weapons.LMG_DRS_IAR,
+            mod.Weapons.LMG_KTS100_MK8,
+            mod.Weapons.LMG_L110,
+            mod.Weapons.LMG_M_60,
+            mod.Weapons.LMG_M123K,
+            mod.Weapons.LMG_M240L,
+            mod.Weapons.LMG_M250,
+            mod.Weapons.LMG_RPKM,
+            mod.Weapons.Shotgun__185KS_K,
+            mod.Weapons.Shotgun_M1014,
+            mod.Weapons.Shotgun_M87A1,
+            mod.Weapons.Sidearm_ES_57,
+            mod.Weapons.Sidearm_M44,
+            mod.Weapons.Sidearm_M45A1,
+            mod.Weapons.Sidearm_P18,
+            mod.Weapons.SMG_KV9,
+            mod.Weapons.SMG_PW5A3,
+            mod.Weapons.SMG_PW7A2,
+            mod.Weapons.SMG_SCW_10,
+            mod.Weapons.SMG_SGX,
+            mod.Weapons.SMG_SL9,
+            mod.Weapons.SMG_UMG_40,
+            mod.Weapons.SMG_USG_90,
+            mod.Weapons.Sniper_M2010_ESR,
+            mod.Weapons.Sniper_PSR,
+            mod.Weapons.Sniper_SV_98,
+
         ],
         ALLOWED_GADGETS_SURVIVORS: [
-            mod.Gadgets.Melee_Combat_Knife
+            mod.Gadgets.Class_Adrenaline_Injector,
+            mod.Gadgets.Class_Motion_Sensor,
+            mod.Gadgets.Class_Repair_Tool,
+            mod.Gadgets.Class_Supply_Bag,
+            mod.Gadgets.Deployable_Cover,
+            mod.Gadgets.Deployable_Deploy_Beacon,
+            mod.Gadgets.Deployable_EOD_Bot,
+            mod.Gadgets.Deployable_Grenade_Intercept_System,
+            mod.Gadgets.Deployable_Missile_Intercept_System,
+            mod.Gadgets.Deployable_Portable_Mortar,
+            mod.Gadgets.Deployable_Recon_Drone,
+            mod.Gadgets.Deployable_Vehicle_Supply_Crate,
+            mod.Gadgets.Launcher_Aim_Guided,
+            mod.Gadgets.Launcher_Air_Defense,
+            mod.Gadgets.Launcher_Auto_Guided,
+            mod.Gadgets.Launcher_Breaching_Projectile,
+            mod.Gadgets.Launcher_High_Explosive,
+            mod.Gadgets.Launcher_Incendiary_Airburst,
+            mod.Gadgets.Launcher_Long_Range,
+            mod.Gadgets.Launcher_Smoke_Grenade,
+            mod.Gadgets.Launcher_Thermobaric_Grenade,
+            mod.Gadgets.Launcher_Unguided_Rocket,
+            mod.Gadgets.Melee_Combat_Knife,
+            mod.Gadgets.Melee_Hunting_Knife,
+            mod.Gadgets.Melee_Sledgehammer,
+            mod.Gadgets.Misc_Acoustic_Sensor_AV_Mine,
+            mod.Gadgets.Misc_Anti_Personnel_Mine,
+            mod.Gadgets.Misc_Anti_Vehicle_Mine,
+            mod.Gadgets.Misc_Assault_Ladder,
+            mod.Gadgets.Misc_Defibrillator,
+            mod.Gadgets.Misc_Demolition_Charge,
+            mod.Gadgets.Misc_Incendiary_Round_Shotgun,
+            mod.Gadgets.Misc_Laser_Designator,
+            mod.Gadgets.Misc_Sniper_Decoy,
+            mod.Gadgets.Misc_Supply_Pouch,
+            mod.Gadgets.Misc_Tracer_Dart,
+            mod.Gadgets.Misc_Tripwire_Sensor_AV_Mine,
+            mod.Gadgets.Throwable_Anti_Vehicle_Grenade,
+            mod.Gadgets.Throwable_Flash_Grenade,
+            mod.Gadgets.Throwable_Fragmentation_Grenade,
+            mod.Gadgets.Throwable_Incendiary_Grenade,
+            mod.Gadgets.Throwable_Mini_Frag_Grenade,
+            mod.Gadgets.Throwable_Proximity_Detector,
+            mod.Gadgets.Throwable_Smoke_Grenade,
+            mod.Gadgets.Throwable_Stun_Grenade,
+            mod.Gadgets.Throwable_Throwing_Knife,
         ],
         NUM_INFECTED_THROWING_KNIVES: 3
     }
@@ -113,10 +203,38 @@ export function OnPlayerEarnedKill(
     if (killerId === victimId) return;
 
     const killer = gameState.players.get(killerId)
-    if (!killer) return;
-    killer.eliminations++
+    const victim = gameState.players.get(victimId)
+
+
+    if (!killer || !victim) return;
+    if (killer.team === InfectedTeam.SURVIVORS && victim.team === InfectedTeam.INFECTED) {
+        killer.eliminations++;
+    } else if (killer.team === InfectedTeam.INFECTED && victim.team === InfectedTeam.SURVIVORS) {
+        killer.infections++;
+    }
 
     logger.log(`Player ${killerId} earned a kill on Player ${victimId}.`);
+}
+
+export function OnPlayerDamaged(
+    eventPlayer: mod.Player,
+    eventOtherPlayer: mod.Player,
+    eventDamageType: mod.DamageType,
+    eventWeaponUnlock: mod.WeaponUnlock
+) {
+    if (!mod.IsPlayerValid(eventPlayer) || !mod.IsPlayerValid(eventOtherPlayer)) return;
+
+    const victim = gameState.players.get(mod.GetObjId(eventPlayer));
+    const attacker = gameState.players.get(mod.GetObjId(eventOtherPlayer));
+
+    if (!victim) return;
+    let assignedDamage = victim.health - victim.currentHealth
+
+    if (attacker && victim.playerId !== attacker.playerId) {
+        attacker.damageDealt += assignedDamage
+    }
+
+    victim.health = victim.currentHealth
 }
 
 class InfectionPlayer {
@@ -126,27 +244,33 @@ class InfectionPlayer {
     perks: any;
     isDeployed: boolean = false;
     movementDisabled: boolean = false;
+    totalScore: number = 0;
+    timeAlive: number = 0;
     eliminations: number = 0;
+    infections: number = 0;
+    damageDealt: number = 0;
+    health: number = 0;
 
     constructor(eventPlayer: mod.Player) {
         this.player = eventPlayer;
         this.playerId = mod.GetObjId(eventPlayer);
         this.perks = { survivor: {}, infected: {} };
+        this.health = this.currentHealth
         mod.SetRedeployTime(eventPlayer, 0);
         gameState.players.set(this.playerId, this);
         this.restrictLoadouts();
     }
 
     get maxHealth() {
-        return mod.GetSoldierState(this.player, mod.SoldierStateNumber.MaxHealth)
+        return (this.isDeployed) ? mod.GetSoldierState(this.player, mod.SoldierStateNumber.MaxHealth) : 0
     }
 
     get currentHealth() {
-        return mod.GetSoldierState(this.player, mod.SoldierStateNumber.CurrentHealth)
+        return (this.isDeployed) ? mod.GetSoldierState(this.player, mod.SoldierStateNumber.CurrentHealth) : 0
     }
 
     get isAlive(): boolean {
-        return mod.GetSoldierState(this.player, mod.SoldierStateBool.IsAlive)
+        return (this.isDeployed) ? mod.GetSoldierState(this.player, mod.SoldierStateBool.IsAlive) : false
     }
 
     get isAIPlayer(): boolean {
@@ -252,9 +376,6 @@ class LoadoutManager {
             mod.AddEquipment(player.player, mod.Gadgets.Melee_Combat_Knife);
             mod.AddEquipment(player.player, mod.Gadgets.Throwable_Throwing_Knife);
             mod.SetInventoryAmmo(player.player, mod.InventorySlots.Throwable, LoadoutManager.infectedThrowableKnives)
-        } else {
-            mod.AddEquipment(player.player, mod.Weapons.Shotgun_M1014);
-            mod.AddEquipment(player.player, mod.Gadgets.Melee_Combat_Knife);
         }
 
         logger.log(`Gave ${player.team === InfectedTeam.INFECTED ? "Infected" : "Survivor"} loadout to ${player.playerId}`);
@@ -262,7 +383,70 @@ class LoadoutManager {
 }
 
 class ScoreboardManager {
+    static Instance = new ScoreboardManager();
+    private updateFrequency: number = 1;
 
+    private constructor() { }
+
+    initScoreboard() {
+        mod.SetScoreboardType(mod.ScoreboardType.CustomTwoTeams)
+        mod.SetScoreboardHeader(mod.Message("Survivors"), mod.Message("Infected"))
+        mod.SetScoreboardColumnNames(
+            mod.Message("totalScore"),
+            mod.Message("timeAlive"),
+            mod.Message("eliminations"),
+            mod.Message("infections"),
+            mod.Message("damageDealt")
+        );
+        mod.SetScoreboardColumnWidths(1.0, 1.0, 1.0, 1.0, 1.0);
+        mod.SetScoreboardSorting(1, true);
+    }
+
+    async scoreboardLoop() {
+        while (gameState.gameStarted) {
+            await mod.Wait(this.updateFrequency);
+            this.updateAllPlayers();
+        }
+    }
+
+    updateAllPlayers() {
+        for (const player of gameState.players.values()) {
+            this.updatePlayer(player);
+        }
+    }
+
+    updatePlayer(p: InfectionPlayer) {
+        if (p.team === InfectedTeam.SURVIVORS && p.isAlive) {
+            p.timeAlive += this.updateFrequency;
+        }
+
+        const timeScore = Math.floor(p.timeAlive * 2);
+        const elimScore = p.eliminations * 100;    // 100 pts per elimination
+        const infectScore = p.infections * 500;    // 500 pts per infection
+        const dmgScore = Math.floor(p.damageDealt / 10); // 1 point per 10 dmg
+        const totalScore = timeScore + elimScore + infectScore + dmgScore;
+
+        p.totalScore = totalScore;
+
+        mod.SetScoreboardPlayerValues(
+            p.player,
+            totalScore,
+            timeScore,
+            p.eliminations,
+            p.infections,
+            dmgScore
+        );
+    }
+
+    resetAllPlayers() {
+        for (const p of gameState.players.values()) {
+            p.totalScore = 0;
+            p.timeAlive = 0;
+            p.eliminations = 0;
+            p.infections = 0;
+            p.damageDealt = 0;
+        }
+    }
 }
 
 class BFI_UIInfectedCount {
@@ -428,7 +612,7 @@ class BFI_UIMatchTimer {
                 visible: true,
                 padding: 0,
                 bgColor: [0.2118, 0.2235, 0.2353],
-                bgAlpha: 1,
+                bgAlpha: 0.75,
                 bgFill: mod.UIBgFill.Blur,
                 children: [
                     {
@@ -488,9 +672,6 @@ class BFI_UIMatchTimer {
 
     Update() {
         if (this.timerTextWidget) {
-            // let time = this.formatTime()
-            // logger.log(`${time}`)
-
             let minutes = this.calcMinutes()
             let seconds = this.calcSeconds()
             let key
@@ -506,6 +687,151 @@ class BFI_UIMatchTimer {
             }
 
             mod.SetUITextLabel(this.timerTextWidget, mod.Message(key, minutes, seconds));
+        }
+    }
+}
+
+class BFI_UIVersion {
+    versionWidget: mod.UIWidget | undefined;
+
+    constructor() {
+        this.versionWidget = modlib.ParseUI(
+            {
+                name: "Text_6GZDR",
+                type: "Text",
+                position: [0, 0],
+                size: [180, 40],
+                anchor: mod.UIAnchor.BottomRight,
+                visible: true,
+                padding: 8,
+                bgColor: [1, 1, 1],
+                bgAlpha: 1,
+                bgFill: mod.UIBgFill.None,
+                textLabel: mod.stringkeys.versionNumber,
+                textColor: [1, 1, 1],
+                textAlpha: 1,
+                textSize: 20,
+                textAnchor: mod.UIAnchor.CenterRight
+            }
+        );
+    }
+}
+
+class BFI_UIRoundPhase {
+    roundPhaseWidget: mod.UIWidget | undefined;
+    roundTextWidget: mod.UIWidget | undefined;
+    phaseTextWidget: mod.UIWidget | undefined;
+
+    private static PHASE_COLORS: Record<MatchStatus, [number, number, number]> = {
+        [MatchStatus.LOBBY]: [1, 0.9882, 0.6118],
+        [MatchStatus.PRE_ROUND]: [0.4392, 0.9216, 1],
+        [MatchStatus.COUNTDOWN]: [1, 0.5137, 0.3804],
+        [MatchStatus.IN_PROGRESS]: [0.6784, 0.9922, 0.5255],
+        [MatchStatus.ROUND_END]: [1, 0.9882, 0.6118],
+        [MatchStatus.GAME_END]: [1, 0.5137, 0.3804]
+    };
+
+    constructor() {
+
+        const roundTextName = "Round_Text"
+        const phaseTextName = "Phase_Text"
+
+        this.roundPhaseWidget = modlib.ParseUI(
+            {
+                name: "roundPhase_container",
+                type: "Container",
+                position: [1660, 851.68],
+                size: [260, 45],
+                anchor: mod.UIAnchor.TopLeft,
+                visible: true,
+                padding: 0,
+                bgColor: [0.0314, 0.0431, 0.0431],
+                bgAlpha: 0.75,
+                bgFill: mod.UIBgFill.Blur,
+                children: [
+                    {
+                        name: roundTextName,
+                        type: "Text",
+                        position: [0, 0],
+                        size: [125, 30],
+                        anchor: mod.UIAnchor.CenterLeft,
+                        visible: true,
+                        padding: 8,
+                        bgColor: [0.2, 0.2, 0.2],
+                        bgAlpha: 1,
+                        bgFill: mod.UIBgFill.None,
+                        textLabel: mod.Message(mod.stringkeys.roundText, 0, 0),
+                        textColor: [1, 1, 1],
+                        textAlpha: 1,
+                        textSize: 18,
+                        textAnchor: mod.UIAnchor.CenterLeft
+                    },
+                    {
+                        name: phaseTextName,
+                        type: "Text",
+                        position: [0, 0],
+                        size: [125, 30],
+                        anchor: mod.UIAnchor.CenterRight,
+                        visible: true,
+                        padding: 0,
+                        bgColor: [0.6784, 0.9922, 0.5255],
+                        bgAlpha: 1,
+                        bgFill: mod.UIBgFill.None,
+                        textLabel: mod.stringkeys.phaseWaiting,
+                        textColor: [0.6784, 0.9922, 0.5255],
+                        textAlpha: 1,
+                        textSize: 18,
+                        textAnchor: mod.UIAnchor.CenterLeft
+                    }
+                ]
+            }
+        );
+
+        this.roundTextWidget = mod.FindUIWidgetWithName(roundTextName);
+        this.phaseTextWidget = mod.FindUIWidgetWithName(phaseTextName);
+    }
+
+    Update() {
+        let currentRound = gameState.currentRound
+        let totalRounds = gameState.numberOfRounds
+
+        if (this.roundTextWidget) {
+            mod.SetUITextLabel(
+                this.roundTextWidget,
+                mod.Message(mod.stringkeys.roundText, currentRound, totalRounds)
+            );
+        }
+
+        if (this.phaseTextWidget) {
+            let key;
+            switch (gameState.matchStatus) {
+                case MatchStatus.LOBBY:
+                    key = mod.stringkeys.phaseWaiting;
+                    break;
+                case MatchStatus.PRE_ROUND:
+                    key = mod.stringkeys.phaseDeploying;
+                    break;
+                case MatchStatus.COUNTDOWN:
+                    key = mod.stringkeys.phaseStarting;
+                    break;
+                case MatchStatus.IN_PROGRESS:
+                    key = mod.stringkeys.phaseActive;
+                    break;
+                case MatchStatus.ROUND_END:
+                    key = mod.stringkeys.phaseRestarting;
+                    break;
+                case MatchStatus.GAME_END:
+                    key = mod.stringkeys.phaseGameOver;
+                    break;
+                default:
+                    key = mod.stringkeys.phaseWaiting;
+                    break;
+            }
+
+            mod.SetUITextLabel(this.phaseTextWidget, mod.Message(key));
+
+            const color = BFI_UIRoundPhase.PHASE_COLORS[gameState.matchStatus] ?? [1, 1, 1];
+            mod.SetUITextColor(this.phaseTextWidget, mod.CreateVector(color[0], color[1], color[2]));
         }
     }
 }
@@ -537,6 +863,8 @@ class InfectionGameState {
 
     InfectedCountUI: BFI_UIInfectedCount = new BFI_UIInfectedCount();
     InfectedTimerUI: BFI_UIMatchTimer = new BFI_UIMatchTimer();
+    InfectedRoundPhaseUI: BFI_UIRoundPhase = new BFI_UIRoundPhase();
+    InfectedVersionUI: BFI_UIVersion = new BFI_UIVersion();
 
     constructor(minPlayersToStart?: number, initialInfectedCount?: number, numberOfRounds?: number, preRoundSeconds?: number, countdownSeconds?: number, roundSeconds?: number, roundEndSeconds?: number) {
         if (minPlayersToStart) this.minPlayersToStart = minPlayersToStart;
@@ -550,11 +878,12 @@ class InfectionGameState {
 
     initGameState() {
         mod.SetSpawnMode(mod.SpawnModes.Deploy)
-        this.initScoreboard();
+        scoreboard.initScoreboard()
 
         if (DEV_BUILD.ENABLED) this.spawnAI()
 
         this.mainGameLoop();
+        scoreboard.scoreboardLoop();
     }
 
     async spawnAI() {
@@ -571,15 +900,10 @@ class InfectionGameState {
         }
     }
 
-    initScoreboard() {
-        mod.SetScoreboardType(mod.ScoreboardType.CustomTwoTeams)
-        mod.SetScoreboardHeader(mod.Message("Survivors"), mod.Message("Infected"))
-        mod.SetScoreboardColumnNames(mod.Message("Eliminations"))
-    }
-
     updateUI() {
         this.InfectedCountUI.Update(gameState.survivors.size, gameState.infected.size);
         this.InfectedTimerUI.Update();
+        this.InfectedRoundPhaseUI.Update();
     }
 
     initializePlayer(eventPlayer: mod.Player) {
@@ -653,18 +977,18 @@ class InfectionGameState {
             this.matchStatus = MatchStatus.COUNTDOWN;
             this.pointInTime = mod.GetMatchTimeElapsed();
             this.phaseSeconds = this.countdownSeconds
-            mod.DeployAllPlayers()
         }
 
         this.phaseTimer(this.countdownSeconds, MatchStatus.IN_PROGRESS)
     }
 
-    async setupFirstInfected() {
+    setupFirstInfected() {
         logger.log(`Setup First Infected`)
         if (this.matchStatus !== MatchStatus.IN_PROGRESS) return;
         const survivors = this.survivors
 
-        const pick = survivors.get(Math.floor(Math.random() * (survivors.size - 1)));
+        const survivorArray = Array.from(survivors.values());
+        const pick = survivorArray[Math.floor(Math.random() * survivorArray.length)];
 
         if (pick) {
             pick.becomeInfected();
@@ -676,6 +1000,7 @@ class InfectionGameState {
     inProgressHandler() {
         if (!this.phaseWait) {
             this.phaseWait = true
+            mod.DeployAllPlayers()
             logger.log(`In Progress Handler`)
             mod.DisplayNotificationMessage(mod.Message("inProgressStart"))
             this.matchStatus = MatchStatus.IN_PROGRESS;
@@ -686,6 +1011,7 @@ class InfectionGameState {
 
         if (this.survivors.size <= 0) {
             this.matchStatus = MatchStatus.ROUND_END
+            this.phaseWait = false
         } else {
             this.phaseTimer(this.roundSeconds, MatchStatus.ROUND_END)
         }
@@ -743,15 +1069,18 @@ class DebugLog {
 }
 
 const gameState = InfectionGameState.Instance
-
+const scoreboard = ScoreboardManager.Instance
 const logger = DebugLog.Logger
 
 // MORE SPAWNS (4)
-// IMPLEMENT SCOREBOARD
+
 // ALLOW PICKING GUNS (2)
-// FIX SELECTION BUG (1)
-// FIX DEPLOYING AS SURVIVOR AFTER MATCH STARTS (3)
 // DISCORD LINK
 // ALPHA ZOMBIE
 // lAST SURVIVOR
 // fIX WHO WINS
+
+// Add round counter
+// Add match status UI
+// add loop to handle if players leave
+// look into kits not being available on different teams

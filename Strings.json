@@ -12,5 +12,17 @@
   "roundEndStartInfected": "Infected win the round!",
   "Survivors": "Survivors",
   "Infected": "Infected",
-  "Eliminations": "Eliminations"
+  "totalScore": "Score",
+  "timeAlive": "Time",
+  "eliminations": "Kills",
+  "infections": "Infects",
+  "damageDealt": "Damage",
+  "versionNumber": "BF: Infection v1.0",
+  "roundText": "Round {} / {}",
+  "phaseWaiting": "Waiting",
+  "phaseDeploying": "Deploying",
+  "phaseStarting": "Starting",
+  "phaseActive": "Active",
+  "phaseRestarting": "Restarting",
+  "phaseGameOver": "Game Over"
 }
