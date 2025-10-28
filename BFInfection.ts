@@ -1243,11 +1243,29 @@ class InProgressPhase extends GamePhase {
             return;
         }
 
-        const pick = survivorArray[Math.floor(Math.random() * survivorArray.length)];
-        if (pick) {
-            await pick.becomeInfected();
+        const initialInfectedTarget = Math.min(this.game.initialInfectedCount, survivorArray.length);
+
+        if (initialInfectedTarget <= 0) {
+            logger.log(`Initial infected count configured as 0; no survivors infected at round start.`);
+            return;
+        }
+
+        const shuffledSurvivors = [...survivorArray];
+        for (let i = shuffledSurvivors.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [shuffledSurvivors[i], shuffledSurvivors[j]] = [shuffledSurvivors[j], shuffledSurvivors[i]];
+        }
+
+        const selectedSurvivors = shuffledSurvivors.slice(0, initialInfectedTarget);
+
+        for (const survivor of selectedSurvivors) {
+            await survivor.becomeInfected();
+        }
+
+        if (selectedSurvivors.length > 0) {
             this.firstInfectedSelected = true;
-            logger.log(`Player ${pick.playerId} selected as first infected!`);
+            const selectedIds = selectedSurvivors.map((survivor) => survivor.playerId).join(', ');
+            logger.log(`Selected ${selectedSurvivors.length} initial infected: ${selectedIds}`);
         }
     }
 }
