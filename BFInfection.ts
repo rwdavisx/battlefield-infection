@@ -1204,13 +1204,11 @@ class CountdownPhase extends GamePhase {
 class InProgressPhase extends GamePhase {
     status = MatchStatus.IN_PROGRESS;
     get phaseDuration() { return this.game.roundSeconds; }
-    private firstInfectedSelected: boolean = false;
 
     async onEnter(): Promise<void> {
         super.onEnter();
         mod.DeployAllPlayers();
         mod.DisplayNotificationMessage(mod.Message("inProgressStart"));
-        this.firstInfectedSelected = false;
         await this.setupFirstInfected();
     }
 
@@ -1246,7 +1244,6 @@ class InProgressPhase extends GamePhase {
         const pick = survivorArray[Math.floor(Math.random() * survivorArray.length)];
         if (pick) {
             await pick.becomeInfected();
-            this.firstInfectedSelected = true;
             logger.log(`Player ${pick.playerId} selected as first infected!`);
         }
     }
