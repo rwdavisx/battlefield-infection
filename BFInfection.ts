@@ -563,7 +563,7 @@ class LoadoutManager {
 
     // Main enforcement method: restrict disallowed items and ensure baseline loadout
     static enforce(player: InfectionPlayer): void {
-        if (!mod.IsPlayerValid(player.player) || !player.isDeployed || !player.isAlive) {
+        if (!mod.IsPlayerValid(player.player) || !player.isDeployed) {
             return;
         }
 
@@ -575,6 +575,14 @@ class LoadoutManager {
     // Ensure player has minimum required equipment
     private static ensureBaseline(player: InfectionPlayer): void {
         if (player.team === InfectedTeam.INFECTED) {
+            // Strip any remaining firearms from the infected player's inventory
+            try {
+                mod.RemoveEquipment(player.player, mod.InventorySlots.PrimaryWeapon);
+                mod.RemoveEquipment(player.player, mod.InventorySlots.SecondaryWeapon);
+            } catch (error) {
+                logger.log(`Warning: Failed to clear firearms for infected player ${player.playerId}: ${error}`);
+            }
+
             // Infected must have combat knife
             if (!mod.HasEquipment(player.player, mod.Gadgets.Melee_Combat_Knife)) {
                 mod.AddEquipment(player.player, mod.Gadgets.Melee_Combat_Knife);
@@ -586,6 +594,13 @@ class LoadoutManager {
                 mod.AddEquipment(player.player, mod.Gadgets.Throwable_Throwing_Knife);
                 mod.SetInventoryAmmo(player.player, mod.InventorySlots.Throwable, this.infectedThrowableKnives);
                 logger.log(`Gave Throwing Knives to infected player ${player.playerId}`);
+            }
+
+            // Force the infected player to equip their melee weapon after stripping guns
+            try {
+                mod.ForceSwitchInventory(player.player, mod.InventorySlots.MeleeWeapon);
+            } catch (error) {
+                logger.log(`Warning: Failed to force melee weapon for infected player ${player.playerId}: ${error}`);
             }
         } else {
             // Survivors must have at least one allowed weapon
@@ -1352,6 +1367,7 @@ class InfectionGameState {
     InfectedTimerUI: BFI_UIMatchTimer = new BFI_UIMatchTimer();
     InfectedRoundPhaseUI: BFI_UIRoundPhase = new BFI_UIRoundPhase();
     InfectedVersionUI: BFI_UIVersion = new BFI_UIVersion();
+    private ensuringInitialInfected: boolean = false;
 
     constructor(minPlayersToStart?: number, initialInfectedCount?: number, numberOfRounds?: number, preRoundSeconds?: number, countdownSeconds?: number, roundSeconds?: number, roundEndSeconds?: number) {
         if (minPlayersToStart) this.minPlayersToStart = minPlayersToStart;
@@ -1425,6 +1441,54 @@ class InfectionGameState {
             }
         }
         logger.log('Loadout guard loop ended.');
+    }
+
+    private async ensureInitialInfectedPresence(): Promise<void> {
+        if (this.matchStatus !== MatchStatus.IN_PROGRESS) {
+            return;
+        }
+
+        if (this.ensuringInitialInfected) {
+            return;
+        }
+
+        const totalPlayers = this.players.size;
+        if (totalPlayers === 0) {
+            return;
+        }
+
+        const targetInitialInfected = Math.max(1, Math.min(this.initialInfectedCount, totalPlayers));
+        const deficit = targetInitialInfected - this.infected.size;
+
+        if (deficit <= 0 || this.survivors.size === 0) {
+            return;
+        }
+
+        this.ensuringInitialInfected = true;
+
+        try {
+            const survivors = Array.from(this.survivors.values());
+
+            // Shuffle survivors for fairness when picking replacements
+            for (let i = survivors.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [survivors[i], survivors[j]] = [survivors[j], survivors[i]];
+            }
+
+            const numberToConvert = Math.min(deficit, survivors.length);
+            const selected: InfectionPlayer[] = survivors.slice(0, numberToConvert);
+
+            for (const survivor of selected) {
+                await survivor.becomeInfected();
+            }
+
+            if (selected.length > 0) {
+                const selectedIds = selected.map((player) => player.playerId).join(', ');
+                logger.log(`Replaced missing initial infected with players: ${selectedIds}`);
+            }
+        } finally {
+            this.ensuringInitialInfected = false;
+        }
     }
 
     async spawnAI() {
@@ -1508,6 +1572,8 @@ class InfectionGameState {
 
             // Update current phase
             this.currentPhase.onUpdate();
+
+            await this.ensureInitialInfectedPresence();
 
             // Check for phase transitions
             const nextStatus = this.currentPhase.checkTransition();
