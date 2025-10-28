@@ -179,7 +179,7 @@ export async function OnPlayerJoinGame(eventPlayer: mod.Player) {
 }
 
 export async function OnSpawnerSpawned(eventPlayer: mod.Player, eventSpawner: mod.Spawner) {
-    await mod.Wait(1)
+    await mod.Wait(5)
     await gameState.initializePlayer(eventPlayer);
     logger.log(`Spawned bot ${mod.GetObjId(eventPlayer)}`);
 }
@@ -1152,7 +1152,6 @@ class PreRoundPhase extends GamePhase {
         // Reset teams
         this.game.survivors.clear();
         this.game.infected.clear();
-        if (DEV_BUILD.ENABLED) await gameState.removeAI()
         if (DEV_BUILD.ENABLED) await gameState.spawnAI()
 
         // Assign all players to survivors (await each to prevent race conditions)
@@ -1289,6 +1288,9 @@ class RoundEndPhase extends GamePhase {
         if (this.game.currentRound >= this.game.numberOfRounds) {
             return MatchStatus.GAME_END;
         }
+
+        // if (DEV_BUILD.ENABLED) await gameState.removeAI()
+
         return MatchStatus.PRE_ROUND;
     }
 }
@@ -1332,7 +1334,7 @@ class InfectionGameState {
     // Phase management
     private phases: Map<MatchStatus, IGamePhase> = new Map();
     private currentPhase: IGamePhase | null = null;
-    minPlayersToStart: number = INFECTION_CFG.GAMEMODE.MINIMUM_PLAYERS
+    minPlayersToStart: number = (DEV_BUILD.ENABLED) ? 1 : INFECTION_CFG.GAMEMODE.MINIMUM_PLAYERS
     initialInfectedCount: number = INFECTION_CFG.GAMEMODE.INITIAL_INFECTED_COUNT
 
     numberOfRounds: number = INFECTION_CFG.GAMEMODE.NUM_OF_ROUNDS
@@ -1434,8 +1436,9 @@ class InfectionGameState {
 
     async removeAI() {
         for (const p of gameState.players.values()) {
-            if(p.isAIPlayer) {
+            if (p.isAIPlayer) {
                 mod.Kill(p.player)
+                await mod.Wait(0.1)
             }
         }
     }
