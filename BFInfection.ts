@@ -1204,13 +1204,11 @@ class CountdownPhase extends GamePhase {
 class InProgressPhase extends GamePhase {
     status = MatchStatus.IN_PROGRESS;
     get phaseDuration() { return this.game.roundSeconds; }
-    private firstInfectedSelected: boolean = false;
 
     async onEnter(): Promise<void> {
         super.onEnter();
         mod.DeployAllPlayers();
         mod.DisplayNotificationMessage(mod.Message("inProgressStart"));
-        this.firstInfectedSelected = false;
         await this.setupFirstInfected();
     }
 
