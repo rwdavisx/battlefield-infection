@@ -16,6 +16,17 @@ const INFECTION_CFG = {
         ROUND_SECONDS: 300,
         ROUND_END_SECONDS: 15
     },
+    SCORING: {
+        TIME_ALIVE_MULTIPLIER: 2,        // Points per second alive (2 pts/sec)
+        ELIMINATION_POINTS: 100,          // Points for killing an infected player
+        INFECTION_POINTS: 500,            // Points for infecting a survivor (harder to do)
+        DAMAGE_DIVISOR: 10,               // 1 point per 10 damage dealt
+    },
+    PERFORMANCE: {
+        LOADOUT_CHECK_INTERVAL: 1,       // Seconds between loadout restriction checks
+        SCOREBOARD_UPDATE_INTERVAL: 1,   // Seconds between scoreboard updates
+        MAIN_LOOP_INTERVAL: 0.25,        // Seconds between main loop iterations
+    },
     LOADOUTS: {
         ALLOWED_WEAPONS_INFECTED: [],
         ALLOWED_GADGETS_INFECTED: [
@@ -136,6 +147,18 @@ enum MatchStatus {
     GAME_END
 }
 
+// Player perks interface for type safety
+interface PlayerPerks {
+    survivor: {
+        speedBoost?: number;
+        damageResistance?: number;
+    };
+    infected: {
+        healthRegen?: boolean;
+        speedBoost?: number;
+    };
+}
+
 // Phase interface for state machine pattern
 interface IGamePhase {
     status: MatchStatus;
@@ -161,6 +184,13 @@ export function OnSpawnerSpawned(eventPlayer: mod.Player, eventSpawner: mod.Spaw
 
 export function OnPlayerLeaveGame(eventNumber: number) {
     const pId = eventNumber;
+
+    // Properly cleanup player before removing
+    const player = gameState.players.get(pId);
+    if (player) {
+        player.cleanup(); // Stop loadout restriction loop
+    }
+
     gameState.players.delete(pId);
     gameState.survivors.delete(pId);
     gameState.infected.delete(pId);
@@ -213,7 +243,26 @@ export async function OnPlayerDied(victimP: mod.Player, killerP: mod.Player) {
     logger.log(`Player ${victim.playerId} died!`)
 }
 
-export function OnMandown(eventPlayer: mod.Player, eventOtherPlayer: mod.Player) { }
+// OnMandown: Called when player is downed (not fully dead yet, can be revived)
+export function OnMandown(eventPlayer: mod.Player, eventOtherPlayer: mod.Player) {
+    const downed = gameState.players.get(mod.GetObjId(eventPlayer));
+
+    if (!downed) return;
+
+    // Infected players should die instantly (no revives for infected)
+    if (downed.team === InfectedTeam.INFECTED) {
+        try {
+            mod.KillPlayer(downed.player);
+            logger.log(`Infected player ${downed.playerId} downed, forcing instant death`);
+        } catch (error) {
+            logger.log(`Failed to kill downed infected player ${downed.playerId}: ${error}`);
+        }
+    }
+    // Survivors can be revived by teammates (default behavior)
+    else if (downed.team === InfectedTeam.SURVIVORS) {
+        logger.log(`Survivor ${downed.playerId} downed, can be revived`);
+    }
+}
 
 export function OnPlayerEarnedKill(
     eventPlayer: mod.Player,
@@ -276,15 +325,16 @@ class InfectionPlayer {
     player: mod.Player;
     playerId: number;
     team: InfectedTeam = InfectedTeam.SURVIVORS
-    perks: any;
+    perks: PlayerPerks;
     isDeployed: boolean = false;
-    movementDisabled: boolean = false;
-    totalScore: number = 0;
     timeAlive: number = 0;
     eliminations: number = 0;
     infections: number = 0;
     damageDealt: number = 0;
     health: number = 0;
+
+    // Control flag for loadout restriction loop
+    private shouldStopLoadoutRestriction: boolean = false;
 
     constructor(eventPlayer: mod.Player) {
         this.player = eventPlayer;
@@ -292,9 +342,19 @@ class InfectionPlayer {
         this.perks = { survivor: {}, infected: {} };
         // Health will be initialized when player deploys (currentHealth is 0 until deployed)
         this.health = 0;
-        mod.SetRedeployTime(eventPlayer, 0);
-        gameState.players.set(this.playerId, this);
-        this.restrictLoadouts();
+    }
+
+    // Separate initialization method to avoid constructor side effects
+    initialize(): void {
+        mod.SetRedeployTime(this.player, 0);
+        this.startLoadoutRestriction();
+        logger.log(`Player ${this.playerId} initialized`);
+    }
+
+    // Method to properly stop the loadout restriction loop
+    cleanup(): void {
+        this.shouldStopLoadoutRestriction = true;
+        logger.log(`Player ${this.playerId} cleanup initiated`);
     }
 
     get maxHealth() {
@@ -313,89 +373,152 @@ class InfectionPlayer {
         return mod.GetSoldierState(this.player, mod.SoldierStateBool.IsAISoldier)
     }
 
-    async restrictLoadouts() {
-        while (true) {
-            await mod.Wait(1);
-            if (!gameState.gameStarted) continue;
-            if (!mod.IsPlayerValid(this.player)) continue;
+    // Start the loadout restriction loop
+    private startLoadoutRestriction(): void {
+        this.restrictLoadoutsLoop();
+    }
+
+    // Fixed: Properly exits loop when player leaves or cleanup is called
+    private async restrictLoadoutsLoop() {
+        logger.log(`Starting loadout restriction loop for player ${this.playerId}`);
+
+        while (!this.shouldStopLoadoutRestriction) {
+            await mod.Wait(INFECTION_CFG.PERFORMANCE.LOADOUT_CHECK_INTERVAL);
+
+            // Exit if game stopped
+            if (!gameState.gameStarted) {
+                logger.log(`Game stopped, exiting loadout loop for player ${this.playerId}`);
+                break;
+            }
+
+            // Exit if player is no longer valid (disconnected)
+            if (!mod.IsPlayerValid(this.player)) {
+                logger.log(`Player ${this.playerId} no longer valid, exiting loadout loop`);
+                break;
+            }
+
             // Only restrict loadouts when player is actually deployed, not in deploy screen
             if (!this.isDeployed) continue;
 
-            LoadoutManager.restrictWeapons(this)
-            LoadoutManager.restrictGadgets(this)
+            try {
+                LoadoutManager.restrictWeapons(this);
+                LoadoutManager.restrictGadgets(this);
+            } catch (error) {
+                logger.log(`Error restricting loadout for player ${this.playerId}: ${error}`);
+            }
         }
+
+        logger.log(`Loadout restriction loop ended for player ${this.playerId}`);
     }
 
     async becomeInfected() {
-        logger.log(`Player ${this.playerId} becoming Infected...`)
+        try {
+            logger.log(`Player ${this.playerId} becoming Infected...`);
 
-        // Undeploy first if deployed
-        const wasDeployed = this.isDeployed;
-        if (wasDeployed) {
-            mod.UndeployPlayer(this.player)
-            await mod.Wait(0.5)
+            // Undeploy first if deployed
+            const wasDeployed = this.isDeployed;
+            if (wasDeployed) {
+                try {
+                    mod.UndeployPlayer(this.player);
+                    await mod.Wait(0.5);
+                } catch (error) {
+                    logger.log(`Warning: Failed to undeploy player ${this.playerId}: ${error}`);
+                }
+            }
+
+            // Update internal state
+            this.team = InfectedTeam.INFECTED;
+
+            // Set the team in the game engine
+            const targetTeam = mod.GetTeam(InfectedTeam.INFECTED);
+            const currentTeam = mod.GetTeam(this.player);
+
+            if (mod.GetObjId(currentTeam) !== InfectedTeam.INFECTED) {
+                try {
+                    mod.SetTeam(this.player, targetTeam);
+                    await mod.Wait(0.1); // Small delay to ensure team switch completes
+                    logger.log(`Player ${this.playerId} team switched from ${mod.GetObjId(currentTeam)} to ${InfectedTeam.INFECTED}`);
+                } catch (error) {
+                    logger.log(`Error: Failed to set team for player ${this.playerId}: ${error}`);
+                    throw error; // Re-throw to prevent inconsistent state
+                }
+            }
+
+            // Update game state maps
+            gameState.infected.set(this.playerId, this);
+            gameState.survivors.delete(this.playerId);
+
+            // Clear all equipment when switching to infected (they'll get knife on next deploy)
+            if (wasDeployed) {
+                try {
+                    LoadoutManager.clearAllEquipment(this);
+                } catch (error) {
+                    logger.log(`Warning: Failed to clear equipment for player ${this.playerId}: ${error}`);
+                }
+            }
+
+            // Note: Don't reset stats here - player keeps their accumulated stats from being a survivor
+
+            logger.log(`Player ${this.playerId} is now Infected!`);
+        } catch (error) {
+            logger.log(`Critical error in becomeInfected for player ${this.playerId}: ${error}`);
+            // Attempt to maintain consistent state
+            this.team = InfectedTeam.INFECTED;
+            gameState.infected.set(this.playerId, this);
+            gameState.survivors.delete(this.playerId);
         }
-
-        // Update internal state
-        this.team = InfectedTeam.INFECTED;
-
-        // Set the team in the game engine
-        const targetTeam = mod.GetTeam(this.team);
-        const currentTeam = mod.GetTeam(this.player);
-
-        if (mod.GetObjId(currentTeam) !== this.team) {
-            mod.SetTeam(this.player, targetTeam);
-            await mod.Wait(0.1); // Small delay to ensure team switch completes
-            logger.log(`Player ${this.playerId} team switched from ${mod.GetObjId(currentTeam)} to ${this.team}`);
-        }
-
-        // Update game state maps
-        gameState.infected.set(this.playerId, this);
-        gameState.survivors.delete(this.playerId);
-
-        // Clear all equipment when switching to infected (they'll get knife on next deploy)
-        if (wasDeployed) {
-            LoadoutManager.clearAllEquipment(this);
-        }
-
-        // Note: Don't reset stats here - player keeps their accumulated stats from being a survivor
-
-        logger.log(`Player ${this.playerId} is now Infected!`)
     }
 
     async becomeSurvivor() {
-        logger.log(`Player ${this.playerId} becoming Survivor...`)
+        try {
+            logger.log(`Player ${this.playerId} becoming Survivor...`);
 
-        // Undeploy first if deployed
-        if (this.isDeployed) {
-            mod.UndeployPlayer(this.player)
-            await mod.Wait(0.5)
+            // Undeploy first if deployed
+            if (this.isDeployed) {
+                try {
+                    mod.UndeployPlayer(this.player);
+                    await mod.Wait(0.5);
+                } catch (error) {
+                    logger.log(`Warning: Failed to undeploy player ${this.playerId}: ${error}`);
+                }
+            }
+
+            // Update internal state
+            this.team = InfectedTeam.SURVIVORS;
+
+            // Set the team in the game engine
+            const targetTeam = mod.GetTeam(InfectedTeam.SURVIVORS);
+            const currentTeam = mod.GetTeam(this.player);
+
+            if (mod.GetObjId(currentTeam) !== InfectedTeam.SURVIVORS) {
+                try {
+                    mod.SetTeam(this.player, targetTeam);
+                    await mod.Wait(0.1); // Small delay to ensure team switch completes
+                    logger.log(`Player ${this.playerId} team switched from ${mod.GetObjId(currentTeam)} to ${InfectedTeam.SURVIVORS}`);
+                } catch (error) {
+                    logger.log(`Error: Failed to set team for player ${this.playerId}: ${error}`);
+                    throw error; // Re-throw to prevent inconsistent state
+                }
+            }
+
+            // Update game state maps
+            gameState.survivors.set(this.playerId, this);
+            gameState.infected.delete(this.playerId);
+
+            // Reset stats for new round
+            this.timeAlive = 0;
+            this.eliminations = 0;
+            this.infections = 0;
+            this.damageDealt = 0;
+
+            logger.log(`Player ${this.playerId} is now a Survivor!`);
+        } catch (error) {
+            logger.log(`Critical error in becomeSurvivor for player ${this.playerId}: ${error}`);
+            // Attempt to maintain consistent state
+            this.team = InfectedTeam.SURVIVORS;
+            gameState.survivors.set(this.playerId, this);
+            gameState.infected.delete(this.playerId);
         }
-
-        // Update internal state
-        this.team = InfectedTeam.SURVIVORS;
-
-        // Set the team in the game engine
-        const targetTeam = mod.GetTeam(this.team);
-        const currentTeam = mod.GetTeam(this.player);
-
-        if (mod.GetObjId(currentTeam) !== this.team) {
-            mod.SetTeam(this.player, targetTeam);
-            await mod.Wait(0.1); // Small delay to ensure team switch completes
-            logger.log(`Player ${this.playerId} team switched from ${mod.GetObjId(currentTeam)} to ${this.team}`);
-        }
-
-        // Update game state maps
-        gameState.survivors.set(this.playerId, this);
-        gameState.infected.delete(this.playerId);
-
-        // Reset stats for new round
-        this.timeAlive = 0;
-        this.eliminations = 0;
-        this.infections = 0;
-        this.damageDealt = 0;
-
-        logger.log(`Player ${this.playerId} is now a Survivor!`)
     }
 }
 
@@ -473,7 +596,7 @@ class LoadoutManager {
 
 class ScoreboardManager {
     static Instance = new ScoreboardManager();
-    private updateFrequency: number = 1;
+    private updateFrequency: number = INFECTION_CFG.PERFORMANCE.SCOREBOARD_UPDATE_INTERVAL;
 
     private constructor() { }
 
@@ -510,13 +633,11 @@ class ScoreboardManager {
             p.timeAlive += this.updateFrequency;
         }
 
-        const timeScore = Math.floor(p.timeAlive * 2);
-        const elimScore = p.eliminations * 100;    // 100 pts per elimination
-        const infectScore = p.infections * 500;    // 500 pts per infection
-        const dmgScore = Math.floor(p.damageDealt / 10); // 1 point per 10 dmg
+        const timeScore = Math.floor(p.timeAlive * INFECTION_CFG.SCORING.TIME_ALIVE_MULTIPLIER);
+        const elimScore = p.eliminations * INFECTION_CFG.SCORING.ELIMINATION_POINTS;
+        const infectScore = p.infections * INFECTION_CFG.SCORING.INFECTION_POINTS;
+        const dmgScore = Math.floor(p.damageDealt / INFECTION_CFG.SCORING.DAMAGE_DIVISOR);
         const totalScore = timeScore + elimScore + infectScore + dmgScore;
-
-        p.totalScore = totalScore;
 
         mod.SetScoreboardPlayerValues(
             p.player,
@@ -1281,8 +1402,16 @@ class InfectionGameState {
             return;
         }
 
+        // Create player object (no side effects in constructor now)
         const player = new InfectionPlayer(eventPlayer);
 
+        // Add to game state
+        this.players.set(player.playerId, player);
+
+        // Initialize player (starts loadout restriction, sets redeploy time)
+        player.initialize();
+
+        // Assign to team based on game state
         if (this.gameStarted) {
             if (this.matchStatus === MatchStatus.IN_PROGRESS || this.matchStatus === MatchStatus.ROUND_END) {
                 logger.log(`Player ${player.playerId} joined mid-game, assigning to Infected team`);
@@ -1307,7 +1436,7 @@ class InfectionGameState {
         }
 
         while (this.gameStarted) {
-            await mod.Wait(0.25);
+            await mod.Wait(INFECTION_CFG.PERFORMANCE.MAIN_LOOP_INTERVAL);
             this.updateUI();
 
             if (!this.currentPhase) {
