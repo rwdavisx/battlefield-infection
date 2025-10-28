@@ -185,12 +185,7 @@ export function OnSpawnerSpawned(eventPlayer: mod.Player, eventSpawner: mod.Spaw
 export function OnPlayerLeaveGame(eventNumber: number) {
     const pId = eventNumber;
 
-    // Properly cleanup player before removing
-    const player = gameState.players.get(pId);
-    if (player) {
-        player.cleanup(); // Stop loadout restriction loop
-    }
-
+    // Remove player from all maps
     gameState.players.delete(pId);
     gameState.survivors.delete(pId);
     gameState.infected.delete(pId);
@@ -205,7 +200,9 @@ export async function OnPlayerDeployed(eventPlayer: mod.Player) {
     p.isDeployed = true;
     p.health = p.currentHealth;  // Initialize health when player deploys
 
-    LoadoutManager.giveLoadout(p)
+    // Initial loadout enforcement is handled by centralized loadoutGuardLoop
+    // But we call it once here for immediate enforcement
+    LoadoutManager.enforce(p);
 
     logger.log(`Player ${mod.GetObjId(eventPlayer)} deployed with ${p.health} health`)
 }
@@ -333,9 +330,6 @@ class InfectionPlayer {
     damageDealt: number = 0;
     health: number = 0;
 
-    // Control flag for loadout restriction loop
-    private shouldStopLoadoutRestriction: boolean = false;
-
     constructor(eventPlayer: mod.Player) {
         this.player = eventPlayer;
         this.playerId = mod.GetObjId(eventPlayer);
@@ -347,14 +341,24 @@ class InfectionPlayer {
     // Separate initialization method to avoid constructor side effects
     initialize(): void {
         mod.SetRedeployTime(this.player, 0);
-        this.startLoadoutRestriction();
         logger.log(`Player ${this.playerId} initialized`);
     }
 
-    // Method to properly stop the loadout restriction loop
-    cleanup(): void {
-        this.shouldStopLoadoutRestriction = true;
-        logger.log(`Player ${this.playerId} cleanup initiated`);
+    // Helper to ensure player is on correct team (idempotent)
+    private async ensureTeam(team: InfectedTeam): Promise<void> {
+        const desiredTeamObj = mod.GetTeam(team);
+        const currentTeamId = mod.GetObjId(mod.GetTeam(this.player));
+
+        if (currentTeamId !== team) {
+            try {
+                mod.SetTeam(this.player, desiredTeamObj);
+                await mod.Wait(0.05);
+                logger.log(`Player ${this.playerId} team set to ${InfectedTeam[team]}`);
+            } catch (error) {
+                logger.log(`Error setting team for player ${this.playerId}: ${error}`);
+                throw error;
+            }
+        }
     }
 
     get maxHealth() {
@@ -373,96 +377,49 @@ class InfectionPlayer {
         return mod.GetSoldierState(this.player, mod.SoldierStateBool.IsAISoldier)
     }
 
-    // Start the loadout restriction loop
-    private startLoadoutRestriction(): void {
-        this.restrictLoadoutsLoop();
-    }
-
-    // Fixed: Properly exits loop when player leaves or cleanup is called
-    private async restrictLoadoutsLoop() {
-        logger.log(`Starting loadout restriction loop for player ${this.playerId}`);
-
-        while (!this.shouldStopLoadoutRestriction) {
-            await mod.Wait(INFECTION_CFG.PERFORMANCE.LOADOUT_CHECK_INTERVAL);
-
-            // Exit if game stopped
-            if (!gameState.gameStarted) {
-                logger.log(`Game stopped, exiting loadout loop for player ${this.playerId}`);
-                break;
-            }
-
-            // Exit if player is no longer valid (disconnected)
-            if (!mod.IsPlayerValid(this.player)) {
-                logger.log(`Player ${this.playerId} no longer valid, exiting loadout loop`);
-                break;
-            }
-
-            // Only restrict loadouts when player is actually deployed, not in deploy screen
-            if (!this.isDeployed) continue;
-
-            try {
-                LoadoutManager.restrictWeapons(this);
-                LoadoutManager.restrictGadgets(this);
-            } catch (error) {
-                logger.log(`Error restricting loadout for player ${this.playerId}: ${error}`);
-            }
-        }
-
-        logger.log(`Loadout restriction loop ended for player ${this.playerId}`);
-    }
+    // Loadout enforcement is now handled by centralized loadoutGuardLoop in InfectionGameState
 
     async becomeInfected() {
+        // Idempotent: if already infected, do nothing
+        if (this.team === InfectedTeam.INFECTED) {
+            logger.log(`Player ${this.playerId} is already Infected, skipping`);
+            return;
+        }
+
         try {
             logger.log(`Player ${this.playerId} becoming Infected...`);
 
-            // Undeploy first if deployed
-            const wasDeployed = this.isDeployed;
-            if (wasDeployed) {
+            // Update internal state and maps immediately
+            this.team = InfectedTeam.INFECTED;
+            gameState.infected.set(this.playerId, this);
+            gameState.survivors.delete(this.playerId);
+
+            // Ensure team in game engine
+            await this.ensureTeam(InfectedTeam.INFECTED);
+
+            // Clean redeploy when switching roles if already deployed
+            if (this.isDeployed) {
                 try {
                     mod.UndeployPlayer(this.player);
-                    await mod.Wait(0.5);
+                    await mod.Wait(0.1);
                 } catch (error) {
                     logger.log(`Warning: Failed to undeploy player ${this.playerId}: ${error}`);
                 }
             }
 
-            // Update internal state
-            this.team = InfectedTeam.INFECTED;
-
-            // Set the team in the game engine
-            const targetTeam = mod.GetTeam(InfectedTeam.INFECTED);
-            const currentTeam = mod.GetTeam(this.player);
-
-            if (mod.GetObjId(currentTeam) !== InfectedTeam.INFECTED) {
-                try {
-                    mod.SetTeam(this.player, targetTeam);
-                    await mod.Wait(0.1); // Small delay to ensure team switch completes
-                    logger.log(`Player ${this.playerId} team switched from ${mod.GetObjId(currentTeam)} to ${InfectedTeam.INFECTED}`);
-                } catch (error) {
-                    logger.log(`Error: Failed to set team for player ${this.playerId}: ${error}`);
-                    throw error; // Re-throw to prevent inconsistent state
-                }
+            // Enforce loadout (remove disallowed, ensure baseline)
+            try {
+                LoadoutManager.enforce(this);
+            } catch (error) {
+                logger.log(`Warning: Failed to enforce loadout for player ${this.playerId}: ${error}`);
             }
 
-            // Update game state maps
-            gameState.infected.set(this.playerId, this);
-            gameState.survivors.delete(this.playerId);
-
-            // Clear all equipment when switching to infected (they'll get knife on next deploy)
-            if (wasDeployed) {
-                try {
-                    LoadoutManager.clearAllEquipment(this);
-                } catch (error) {
-                    logger.log(`Warning: Failed to clear equipment for player ${this.playerId}: ${error}`);
-                }
-            }
-
-            // Note: Don't reset stats here - player keeps their accumulated stats from being a survivor
+            // Note: Don't reset stats - player keeps accumulated stats from being a survivor
 
             logger.log(`Player ${this.playerId} is now Infected!`);
         } catch (error) {
             logger.log(`Critical error in becomeInfected for player ${this.playerId}: ${error}`);
-            // Attempt to maintain consistent state
+            // Ensure consistent state even on error
             this.team = InfectedTeam.INFECTED;
             gameState.infected.set(this.playerId, this);
             gameState.survivors.delete(this.playerId);
@@ -470,40 +427,39 @@ class InfectionPlayer {
     }
 
     async becomeSurvivor() {
+        // Idempotent: if already survivor, do nothing
+        if (this.team === InfectedTeam.SURVIVORS) {
+            logger.log(`Player ${this.playerId} is already Survivor, skipping`);
+            return;
+        }
+
         try {
             logger.log(`Player ${this.playerId} becoming Survivor...`);
 
-            // Undeploy first if deployed
+            // Update internal state and maps immediately
+            this.team = InfectedTeam.SURVIVORS;
+            gameState.survivors.set(this.playerId, this);
+            gameState.infected.delete(this.playerId);
+
+            // Ensure team in game engine
+            await this.ensureTeam(InfectedTeam.SURVIVORS);
+
+            // Clean redeploy when switching roles if already deployed
             if (this.isDeployed) {
                 try {
                     mod.UndeployPlayer(this.player);
-                    await mod.Wait(0.5);
+                    await mod.Wait(0.1);
                 } catch (error) {
                     logger.log(`Warning: Failed to undeploy player ${this.playerId}: ${error}`);
                 }
             }
 
-            // Update internal state
-            this.team = InfectedTeam.SURVIVORS;
-
-            // Set the team in the game engine
-            const targetTeam = mod.GetTeam(InfectedTeam.SURVIVORS);
-            const currentTeam = mod.GetTeam(this.player);
-
-            if (mod.GetObjId(currentTeam) !== InfectedTeam.SURVIVORS) {
-                try {
-                    mod.SetTeam(this.player, targetTeam);
-                    await mod.Wait(0.1); // Small delay to ensure team switch completes
-                    logger.log(`Player ${this.playerId} team switched from ${mod.GetObjId(currentTeam)} to ${InfectedTeam.SURVIVORS}`);
-                } catch (error) {
-                    logger.log(`Error: Failed to set team for player ${this.playerId}: ${error}`);
-                    throw error; // Re-throw to prevent inconsistent state
-                }
+            // Enforce loadout (remove disallowed, ensure baseline)
+            try {
+                LoadoutManager.enforce(this);
+            } catch (error) {
+                logger.log(`Warning: Failed to enforce loadout for player ${this.playerId}: ${error}`);
             }
-
-            // Update game state maps
-            gameState.survivors.set(this.playerId, this);
-            gameState.infected.delete(this.playerId);
 
             // Reset stats for new round
             this.timeAlive = 0;
@@ -514,7 +470,7 @@ class InfectionPlayer {
             logger.log(`Player ${this.playerId} is now a Survivor!`);
         } catch (error) {
             logger.log(`Critical error in becomeSurvivor for player ${this.playerId}: ${error}`);
-            // Attempt to maintain consistent state
+            // Ensure consistent state even on error
             this.team = InfectedTeam.SURVIVORS;
             gameState.survivors.set(this.playerId, this);
             gameState.infected.delete(this.playerId);
@@ -563,34 +519,50 @@ class LoadoutManager {
         }
     }
 
-    static giveLoadout(player: InfectionPlayer) {
-        if (player.team === InfectedTeam.INFECTED) {
-            mod.AddEquipment(player.player, mod.Gadgets.Melee_Combat_Knife);
-            mod.AddEquipment(player.player, mod.Gadgets.Throwable_Throwing_Knife);
-            mod.SetInventoryAmmo(player.player, mod.InventorySlots.Throwable, LoadoutManager.infectedThrowableKnives)
+    // Main enforcement method: restrict disallowed items and ensure baseline loadout
+    static enforce(player: InfectionPlayer): void {
+        if (!mod.IsPlayerValid(player.player) || !player.isDeployed || !player.isAlive) {
+            return;
         }
 
-        logger.log(`Gave ${player.team === InfectedTeam.INFECTED ? "Infected" : "Survivor"} loadout to ${player.playerId}`);
+        this.restrictWeapons(player);
+        this.restrictGadgets(player);
+        this.ensureBaseline(player);
     }
 
-    static clearAllEquipment(player: InfectionPlayer) {
-        // Remove all weapons
-        const allWeapons = this.enumValues(mod.Weapons);
-        for (const weapon of allWeapons) {
+    // Ensure player has minimum required equipment
+    private static ensureBaseline(player: InfectionPlayer): void {
+        if (player.team === InfectedTeam.INFECTED) {
+            // Infected must have combat knife
+            if (!mod.HasEquipment(player.player, mod.Gadgets.Melee_Combat_Knife)) {
+                mod.AddEquipment(player.player, mod.Gadgets.Melee_Combat_Knife);
+                logger.log(`Gave Combat Knife to infected player ${player.playerId}`);
+            }
+
+            // Infected must have throwing knives with ammo
+            if (!mod.HasEquipment(player.player, mod.Gadgets.Throwable_Throwing_Knife)) {
+                mod.AddEquipment(player.player, mod.Gadgets.Throwable_Throwing_Knife);
+                mod.SetInventoryAmmo(player.player, mod.InventorySlots.Throwable, this.infectedThrowableKnives);
+                logger.log(`Gave Throwing Knives to infected player ${player.playerId}`);
+            }
+        } else {
+            // Survivors must have at least one allowed weapon
+            if (!this.hasAnyAllowedWeapon(player, this.allowedWeaponsSurvivors)) {
+                // Give them the first allowed weapon (default loadout)
+                mod.AddEquipment(player.player, this.allowedWeaponsSurvivors[0]);
+                logger.log(`Gave default weapon to survivor ${player.playerId}`);
+            }
+        }
+    }
+
+    // Check if player has any weapon from the allowed list
+    private static hasAnyAllowedWeapon(player: InfectionPlayer, allowedList: mod.Weapons[]): boolean {
+        for (const weapon of allowedList) {
             if (mod.HasEquipment(player.player, weapon)) {
-                mod.RemoveEquipment(player.player, weapon);
+                return true;
             }
         }
-
-        // Remove all gadgets except what's allowed for infected
-        const allGadgets = this.enumValues(mod.Gadgets);
-        for (const gadget of allGadgets) {
-            if (mod.HasEquipment(player.player, gadget) && !this.allowedGadgetsInfected.includes(gadget)) {
-                mod.RemoveEquipment(player.player, gadget);
-            }
-        }
-
-        logger.log(`Cleared equipment for player ${player.playerId}`);
+        return false;
     }
 }
 
@@ -1373,6 +1345,25 @@ class InfectionGameState {
 
         this.mainGameLoop();
         scoreboard.scoreboardLoop();
+        this.loadoutGuardLoop();
+    }
+
+    // Centralized loadout enforcement loop (replaces per-player loops)
+    async loadoutGuardLoop() {
+        while (this.gameStarted) {
+            await mod.Wait(INFECTION_CFG.PERFORMANCE.LOADOUT_CHECK_INTERVAL);
+            if (!this.gameStarted) break;
+
+            // Iterate through all players and enforce loadouts
+            for (const player of this.players.values()) {
+                try {
+                    LoadoutManager.enforce(player);
+                } catch (error) {
+                    logger.log(`Error enforcing loadout for player ${player.playerId}: ${error}`);
+                }
+            }
+        }
+        logger.log('Loadout guard loop ended.');
     }
 
     async spawnAI() {
