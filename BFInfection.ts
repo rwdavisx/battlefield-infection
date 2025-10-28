@@ -239,27 +239,6 @@ export async function OnPlayerDied(victimP: mod.Player, killerP: mod.Player) {
     logger.log(`Player ${victim.playerId} died!`);
 }
 
-// OnMandown: Called when player is downed (not fully dead yet, can be revived)
-export function OnMandown(eventPlayer: mod.Player, eventOtherPlayer: mod.Player) {
-    const downed = gameState.players.get(mod.GetObjId(eventPlayer));
-
-    if (!downed) return;
-
-    // Infected players should die instantly (no revives for infected)
-    if (downed.team === InfectedTeam.INFECTED) {
-        try {
-            mod.KillPlayer(downed.player);
-            logger.log(`Infected player ${downed.playerId} downed, forcing instant death`);
-        } catch (error) {
-            logger.log(`Failed to kill downed infected player ${downed.playerId}: ${error}`);
-        }
-    }
-    // Survivors can be revived by teammates (default behavior)
-    else if (downed.team === InfectedTeam.SURVIVORS) {
-        logger.log(`Survivor ${downed.playerId} downed, can be revived`);
-    }
-}
-
 export function OnPlayerEarnedKill(
     eventPlayer: mod.Player,
     eventOtherPlayer: mod.Player,
@@ -1261,7 +1240,6 @@ class InProgressPhase extends GamePhase {
         }
 
         if (selectedSurvivors.length > 0) {
-            this.firstInfectedSelected = true;
             const selectedIds = selectedSurvivors.map((survivor) => survivor.playerId).join(', ');
             logger.log(`Selected ${selectedSurvivors.length} initial infected: ${selectedIds}`);
         }

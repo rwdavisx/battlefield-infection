@@ -95,19 +95,16 @@ export function SortedArray(array: any[], compare: (a: any, b: any) => number) {
 }
 
 export function Equals(a: any, b: any) {
-    if (a == null || b == null) {
-        console.warn('Equals called with null value', { a, b });
-        return false;
-    }
+    if (a == null || b == null) debugger;
     return mod.Equals(a, b);
 }
 
 export async function WaitUntil(delay: number, cond: () => boolean) {
-    // Wait until condition is true or delay expires
+    // complete rush hack. this will likely wait way too long and other problems.
     let deltaCount = 10;
     let deltaWait = delay / deltaCount;
     for (let t = 0; t < deltaCount; t++) {
-        if (cond()) break;
+        if (!cond()) break;
         await mod.Wait(deltaWait);
     }
 }
