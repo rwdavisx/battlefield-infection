@@ -136,6 +136,15 @@ enum MatchStatus {
     GAME_END
 }
 
+// Phase interface for state machine pattern
+interface IGamePhase {
+    status: MatchStatus;
+    onEnter(): void;
+    onUpdate(): void;
+    onExit?(): void;
+    checkTransition(): MatchStatus | null;
+}
+
 export async function OnGameModeStarted() {
     mod.EnableAllPlayerDeploy(false)
     gameState.initGameState();
@@ -917,17 +926,258 @@ class BFI_UIRoundPhase {
     }
 }
 
+// Base phase class with common timer logic
+abstract class GamePhase implements IGamePhase {
+    protected game: InfectionGameState;
+    protected phaseStartTime: number = 0;
+    protected hasEntered: boolean = false;
+
+    abstract status: MatchStatus;
+    abstract get phaseDuration(): number;
+
+    constructor(game: InfectionGameState) {
+        this.game = game;
+    }
+
+    onEnter(): void {
+        this.hasEntered = true;
+        this.phaseStartTime = mod.GetMatchTimeElapsed();
+        this.game.pointInTime = this.phaseStartTime;
+        this.game.phaseSeconds = this.phaseDuration;
+        logger.log(`Entered ${MatchStatus[this.status]} phase`);
+    }
+
+    abstract onUpdate(): void;
+
+    onExit(): void {
+        this.hasEntered = false;
+        logger.log(`Exiting ${MatchStatus[this.status]} phase`);
+    }
+
+    checkTransition(): MatchStatus | null {
+        // Default: transition after timer expires
+        if (this.hasTimerExpired()) {
+            return this.getNextPhase();
+        }
+        return null;
+    }
+
+    protected hasTimerExpired(): boolean {
+        return mod.GetMatchTimeElapsed() >= this.phaseStartTime + this.phaseDuration;
+    }
+
+    protected getElapsedTime(): number {
+        return mod.GetMatchTimeElapsed() - this.phaseStartTime;
+    }
+
+    abstract getNextPhase(): MatchStatus;
+}
+
+// Lobby Phase: Wait for minimum players
+class LobbyPhase extends GamePhase {
+    status = MatchStatus.LOBBY;
+    get phaseDuration() { return 0; } // No timer in lobby
+
+    onEnter(): void {
+        super.onEnter();
+        mod.DisplayNotificationMessage(mod.Message("Waiting for players..."));
+    }
+
+    onUpdate(): void {
+        // Check continuously for minimum players
+    }
+
+    checkTransition(): MatchStatus | null {
+        if (this.game.players.size >= this.game.minPlayersToStart) {
+            logger.log(`Minimum players reached (${this.game.players.size}/${this.game.minPlayersToStart})`);
+            return MatchStatus.PRE_ROUND;
+        }
+        return null;
+    }
+
+    getNextPhase(): MatchStatus {
+        return MatchStatus.PRE_ROUND;
+    }
+}
+
+// Pre-Round Phase: Assign all players to survivors
+class PreRoundPhase extends GamePhase {
+    status = MatchStatus.PRE_ROUND;
+    get phaseDuration() { return this.game.preRoundSeconds; }
+
+    onEnter(): void {
+        super.onEnter();
+        this.game.currentRound++;
+        mod.DisplayNotificationMessage(mod.Message("preRoundStart"));
+
+        // Reset teams
+        this.game.survivors.clear();
+        this.game.infected.clear();
+
+        // Assign all players to survivors
+        for (const player of this.game.players.values()) {
+            player.becomeSurvivor();
+        }
+
+        logger.log(`Round ${this.game.currentRound}/${this.game.numberOfRounds} starting`);
+    }
+
+    onUpdate(): void {
+        // Nothing to update during pre-round
+    }
+
+    getNextPhase(): MatchStatus {
+        return MatchStatus.COUNTDOWN;
+    }
+}
+
+// Countdown Phase: Players deploy and prepare
+class CountdownPhase extends GamePhase {
+    status = MatchStatus.COUNTDOWN;
+    get phaseDuration() { return this.game.countdownSeconds; }
+
+    onEnter(): void {
+        super.onEnter();
+        mod.DisplayNotificationMessage(mod.Message("countdownStart"));
+    }
+
+    onUpdate(): void {
+        // Nothing to update during countdown
+    }
+
+    getNextPhase(): MatchStatus {
+        return MatchStatus.IN_PROGRESS;
+    }
+}
+
+// In Progress Phase: Active gameplay
+class InProgressPhase extends GamePhase {
+    status = MatchStatus.IN_PROGRESS;
+    get phaseDuration() { return this.game.roundSeconds; }
+    private firstInfectedSelected: boolean = false;
+
+    onEnter(): void {
+        super.onEnter();
+        mod.DeployAllPlayers();
+        mod.DisplayNotificationMessage(mod.Message("inProgressStart"));
+        this.firstInfectedSelected = false;
+        this.setupFirstInfected();
+    }
+
+    onUpdate(): void {
+        // Check win condition: all survivors infected
+        if (this.game.survivors.size <= 0) {
+            logger.log(`All survivors infected! Infected team wins.`);
+            // Force transition to round end
+            this.game.transitionToPhase(MatchStatus.ROUND_END);
+        }
+    }
+
+    checkTransition(): MatchStatus | null {
+        // Already handled in onUpdate for immediate transition
+        if (this.game.survivors.size <= 0) {
+            return MatchStatus.ROUND_END;
+        }
+        // Otherwise check timer
+        return super.checkTransition();
+    }
+
+    getNextPhase(): MatchStatus {
+        return MatchStatus.ROUND_END;
+    }
+
+    private setupFirstInfected() {
+        const survivorArray = Array.from(this.game.survivors.values());
+
+        if (survivorArray.length === 0) {
+            logger.log(`Error: No survivors available to select as first infected!`);
+            return;
+        }
+
+        const pick = survivorArray[Math.floor(Math.random() * survivorArray.length)];
+        if (pick) {
+            pick.becomeInfected();
+            this.firstInfectedSelected = true;
+            logger.log(`Player ${pick.playerId} selected as first infected!`);
+        }
+    }
+}
+
+// Round End Phase: Display results and determine winner
+class RoundEndPhase extends GamePhase {
+    status = MatchStatus.ROUND_END;
+    get phaseDuration() { return this.game.roundEndSeconds; }
+
+    onEnter(): void {
+        super.onEnter();
+
+        // Determine round winner
+        if (this.game.survivors.size > 0) {
+            this.game.survivorWinCount++;
+            logger.log(`Survivors win round ${this.game.currentRound}!`);
+            mod.DisplayNotificationMessage(mod.Message("roundEndStartSurvivors"));
+        } else {
+            this.game.infectedWinCount++;
+            logger.log(`Infected win round ${this.game.currentRound}!`);
+            mod.DisplayNotificationMessage(mod.Message("roundEndStartInfected"));
+        }
+
+        logger.log(`Score: Survivors ${this.game.survivorWinCount} - ${this.game.infectedWinCount} Infected`);
+    }
+
+    onUpdate(): void {
+        // Nothing to update during round end
+    }
+
+    getNextPhase(): MatchStatus {
+        // Check if all rounds completed
+        if (this.game.currentRound >= this.game.numberOfRounds) {
+            return MatchStatus.GAME_END;
+        }
+        return MatchStatus.PRE_ROUND;
+    }
+}
+
+// Game End Phase: Match complete
+class GameEndPhase extends GamePhase {
+    status = MatchStatus.GAME_END;
+    get phaseDuration() { return 0; } // No timer, game ends immediately
+
+    onEnter(): void {
+        super.onEnter();
+        logger.log(`Game ended! Final score: Survivors ${this.game.survivorWinCount} - ${this.game.infectedWinCount} Infected`);
+        mod.EndGameMode(this.game.getWinningTeam());
+        this.game.cleanup();
+    }
+
+    onUpdate(): void {
+        // Game is over, nothing to update
+    }
+
+    checkTransition(): MatchStatus | null {
+        return null; // No transitions from game end
+    }
+
+    getNextPhase(): MatchStatus {
+        return MatchStatus.GAME_END; // Stay in game end
+    }
+}
+
 class InfectionGameState {
     static Instance = new InfectionGameState();
     gameStarted = false;
     pointInTime: number = 0;
-    phaseWait: boolean = false;
+    phaseWait: boolean = false; // Kept for backward compatibility with UI
 
     players: Map<number, InfectionPlayer> = new Map<number, InfectionPlayer>();
     survivors: Map<number, InfectionPlayer> = new Map<number, InfectionPlayer>();
     infected: Map<number, InfectionPlayer> = new Map<number, InfectionPlayer>();
 
     matchStatus: MatchStatus = MatchStatus.LOBBY;
+
+    // Phase management
+    private phases: Map<MatchStatus, IGamePhase> = new Map();
+    private currentPhase: IGamePhase | null = null;
     minPlayersToStart: number = INFECTION_CFG.GAMEMODE.MINIMUM_PLAYERS
     initialInfectedCount: number = INFECTION_CFG.GAMEMODE.INITIAL_INFECTED_COUNT
 
@@ -955,6 +1205,43 @@ class InfectionGameState {
         if (countdownSeconds) this.countdownSeconds = countdownSeconds;
         if (roundSeconds) this.roundSeconds = roundSeconds;
         if (roundEndSeconds) this.roundEndSeconds = roundEndSeconds;
+
+        // Initialize all phases
+        this.initializePhases();
+    }
+
+    private initializePhases() {
+        this.phases.set(MatchStatus.LOBBY, new LobbyPhase(this));
+        this.phases.set(MatchStatus.PRE_ROUND, new PreRoundPhase(this));
+        this.phases.set(MatchStatus.COUNTDOWN, new CountdownPhase(this));
+        this.phases.set(MatchStatus.IN_PROGRESS, new InProgressPhase(this));
+        this.phases.set(MatchStatus.ROUND_END, new RoundEndPhase(this));
+        this.phases.set(MatchStatus.GAME_END, new GameEndPhase(this));
+
+        // Start in lobby
+        this.currentPhase = this.phases.get(MatchStatus.LOBBY) || null;
+    }
+
+    transitionToPhase(newStatus: MatchStatus) {
+        const newPhase = this.phases.get(newStatus);
+        if (!newPhase) {
+            logger.log(`Error: Phase ${MatchStatus[newStatus]} not found!`);
+            return;
+        }
+
+        // Exit current phase
+        if (this.currentPhase && this.currentPhase.onExit) {
+            this.currentPhase.onExit();
+        }
+
+        // Update status
+        this.matchStatus = newStatus;
+        this.currentPhase = newPhase;
+
+        // Enter new phase
+        this.currentPhase.onEnter();
+
+        logger.log(`Transitioned to ${MatchStatus[newStatus]}`);
     }
 
     initGameState() {
@@ -971,13 +1258,6 @@ class InfectionGameState {
         for (let i = 0; i < DEV_BUILD.BOTS; i++) {
             mod.SpawnAIFromAISpawner(mod.GetSpawner(DEV_BUILD.SPAWNER_ID), mod.SoldierClass.Recon, mod.GetTeam(1))
             await mod.Wait(0.1)
-        }
-    }
-
-    phaseTimer(phaseTime: number, nextPhase: MatchStatus) {
-        if (mod.GetMatchTimeElapsed() >= this.pointInTime + phaseTime) {
-            this.matchStatus = nextPhase
-            this.phaseWait = false
         }
     }
 
@@ -1017,135 +1297,41 @@ class InfectionGameState {
     }
 
     async mainGameLoop() {
-        this.gameStarted = true
-        mod.EnableAllPlayerDeploy(true)
-        logger.log('Infection Game Mode has started.');
+        this.gameStarted = true;
+        mod.EnableAllPlayerDeploy(true);
+        logger.log('Infection Game Mode started with phase-based state machine.');
+
+        // Enter initial phase (Lobby)
+        if (this.currentPhase) {
+            this.currentPhase.onEnter();
+        }
 
         while (this.gameStarted) {
-            await mod.Wait(0.25)
-            this.updateUI()
-            switch (this.matchStatus) {
-                case MatchStatus.LOBBY: this.lobbyHandler(); break;
-                case MatchStatus.PRE_ROUND: this.preRoundHandler(); break;
-                case MatchStatus.COUNTDOWN: this.countdownHandler(); break;
-                case MatchStatus.IN_PROGRESS: this.inProgressHandler(); break;
-                case MatchStatus.ROUND_END: this.roundEndHandler(); break;
-                case MatchStatus.GAME_END: this.gameEndHandler(); break;
+            await mod.Wait(0.25);
+            this.updateUI();
+
+            if (!this.currentPhase) {
+                logger.log('Error: No current phase!');
+                break;
             }
-        }
-    }
 
-    lobbyHandler() {
-        if (this.players.size >= this.minPlayersToStart) {
-            logger.log(`Lobby Handler: Starting game with ${this.players.size} players (minimum: ${this.minPlayersToStart})`)
-            this.matchStatus = MatchStatus.PRE_ROUND
-        }
-    }
+            // Update current phase
+            this.currentPhase.onUpdate();
 
-    preRoundHandler() {
-        if (!this.phaseWait) {
-            this.phaseWait = true
-            logger.log(`PreRound Handler`)
-            mod.DisplayNotificationMessage(mod.Message("preRoundStart"))
-            this.pointInTime = mod.GetMatchTimeElapsed();
-            this.phaseSeconds = this.preRoundSeconds
-            const preRoundPlayers = this.players.values()
-            this.matchStatus = MatchStatus.PRE_ROUND;
-            this.currentRound++
-            this.survivors.clear();
-            this.infected.clear();
+            // Check for phase transitions
+            const nextStatus = this.currentPhase.checkTransition();
+            if (nextStatus !== null && nextStatus !== this.matchStatus) {
+                this.transitionToPhase(nextStatus);
+            }
 
-            for (const p of preRoundPlayers) {
-                p.becomeSurvivor();
+            // Safety check: if no players, return to lobby
+            if (this.players.size === 0 && this.matchStatus !== MatchStatus.LOBBY && this.matchStatus !== MatchStatus.GAME_END) {
+                logger.log('All players left! Returning to lobby.');
+                this.transitionToPhase(MatchStatus.LOBBY);
             }
         }
 
-        this.phaseTimer(this.preRoundSeconds, MatchStatus.COUNTDOWN)
-    }
-
-    countdownHandler() {
-        if (!this.phaseWait) {
-            this.phaseWait = true
-            logger.log(`Countdown Handler`)
-            mod.DisplayNotificationMessage(mod.Message("countdownStart"))
-            this.matchStatus = MatchStatus.COUNTDOWN;
-            this.pointInTime = mod.GetMatchTimeElapsed();
-            this.phaseSeconds = this.countdownSeconds
-        }
-
-        this.phaseTimer(this.countdownSeconds, MatchStatus.IN_PROGRESS)
-    }
-
-    setupFirstInfected() {
-        logger.log(`Setup First Infected`)
-        if (this.matchStatus !== MatchStatus.IN_PROGRESS) {
-            logger.log(`Warning: setupFirstInfected called but match status is ${MatchStatus[this.matchStatus]}`);
-            return;
-        }
-
-        const survivorArray = Array.from(this.survivors.values());
-
-        if (survivorArray.length === 0) {
-            logger.log(`Error: No survivors available to select as first infected!`);
-            return;
-        }
-
-        const pick = survivorArray[Math.floor(Math.random() * survivorArray.length)];
-
-        if (pick) {
-            pick.becomeInfected();
-            logger.log(`Player ${pick.playerId} became first Infected!`)
-        } else {
-            logger.log(`Error: Failed to select a first infected player`);
-        }
-    }
-
-    inProgressHandler() {
-        if (!this.phaseWait) {
-            this.phaseWait = true
-            mod.DeployAllPlayers()
-            logger.log(`In Progress Handler`)
-            mod.DisplayNotificationMessage(mod.Message("inProgressStart"))
-            this.matchStatus = MatchStatus.IN_PROGRESS;
-            this.setupFirstInfected()
-            this.pointInTime = mod.GetMatchTimeElapsed();
-            this.phaseSeconds = this.roundSeconds
-        }
-
-        if (this.survivors.size <= 0) {
-            this.matchStatus = MatchStatus.ROUND_END
-            this.phaseWait = false
-        } else {
-            this.phaseTimer(this.roundSeconds, MatchStatus.ROUND_END)
-        }
-    }
-
-    roundEndHandler() {
-        if (!this.phaseWait) {
-            this.phaseWait = true
-            logger.log(`Round Ended Handler`)
-            this.matchStatus = MatchStatus.ROUND_END;
-            this.pointInTime = mod.GetMatchTimeElapsed();
-            this.phaseSeconds = this.roundEndSeconds
-            if (this.survivors.size > 0) {
-                this.survivorWinCount++;
-                logger.log(`Survivors Win!`)
-                mod.DisplayNotificationMessage(mod.Message("roundEndStartSurvivors"))
-            } else {
-                this.infectedWinCount++;
-                logger.log(`Infected Win!`)
-                mod.DisplayNotificationMessage(mod.Message("roundEndStartInfected"))
-            }
-        }
-        this.phaseTimer(this.roundEndSeconds, (this.currentRound >= this.numberOfRounds) ? MatchStatus.GAME_END : MatchStatus.PRE_ROUND)
-    }
-
-    gameEndHandler() {
-        logger.log(`Game Ended Handler`)
-        this.matchStatus = MatchStatus.GAME_END;
-
-        mod.EndGameMode(this.getWinningTeam())
-        this.cleanup();
+        logger.log('Game loop ended.');
     }
 
     cleanup() {
