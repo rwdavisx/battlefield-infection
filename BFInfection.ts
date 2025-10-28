@@ -233,6 +233,8 @@ export async function OnPlayerDied(victimP: mod.Player, killerP: mod.Player) {
 
     // Convert survivor to infected if killed during active gameplay
     if (gameState.matchStatus === MatchStatus.IN_PROGRESS && victim.team === InfectedTeam.SURVIVORS) {
+        // Mark the player as no longer deployed before role swap logic runs.
+        victim.isDeployed = false;
         await victim.becomeInfected();
     }
 
@@ -384,7 +386,7 @@ class InfectionPlayer {
             await this.ensureTeam(InfectedTeam.INFECTED);
 
             // Clean redeploy when switching roles if already deployed
-            if (this.isDeployed) {
+            if (this.isAlive) {
                 try {
                     mod.UndeployPlayer(this.player);
                     await mod.Wait(0.1);
@@ -431,7 +433,7 @@ class InfectionPlayer {
             await this.ensureTeam(InfectedTeam.SURVIVORS);
 
             // Clean redeploy when switching roles if already deployed
-            if (this.isDeployed) {
+            if (this.isAlive) {
                 try {
                     mod.UndeployPlayer(this.player);
                     await mod.Wait(0.1);
