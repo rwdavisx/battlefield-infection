@@ -368,19 +368,20 @@ class InfectionPlayer {
     // Loadout enforcement is now handled by centralized loadoutGuardLoop in InfectionGameState
 
     async becomeInfected() {
-        // Idempotent: if already infected, do nothing
-        if (this.team === InfectedTeam.INFECTED) {
-            logger.log(`Player ${this.playerId} is already Infected, skipping`);
+        const alreadyInfected = this.team === InfectedTeam.INFECTED;
+
+        // Update internal state and maps immediately so callers always see consistent membership
+        this.team = InfectedTeam.INFECTED;
+        gameState.infected.set(this.playerId, this);
+        gameState.survivors.delete(this.playerId);
+
+        if (alreadyInfected) {
+            logger.log(`Player ${this.playerId} is already Infected, state refreshed`);
             return;
         }
 
         try {
             logger.log(`Player ${this.playerId} becoming Infected...`);
-
-            // Update internal state and maps immediately
-            this.team = InfectedTeam.INFECTED;
-            gameState.infected.set(this.playerId, this);
-            gameState.survivors.delete(this.playerId);
 
             // Ensure team in game engine
             await this.ensureTeam(InfectedTeam.INFECTED);
@@ -415,19 +416,25 @@ class InfectionPlayer {
     }
 
     async becomeSurvivor() {
-        // Idempotent: if already survivor, do nothing
-        if (this.team === InfectedTeam.SURVIVORS) {
-            logger.log(`Player ${this.playerId} is already Survivor, skipping`);
-            return;
-        }
+        const alreadySurvivor = this.team === InfectedTeam.SURVIVORS;
+
+        // Update internal state and maps immediately so survivor roster is always accurate
+        this.team = InfectedTeam.SURVIVORS;
+        gameState.survivors.set(this.playerId, this);
+        gameState.infected.delete(this.playerId);
+
+        // Reset stats for new round
+        this.timeAlive = 0;
+        this.eliminations = 0;
+        this.infections = 0;
+        this.damageDealt = 0;
 
         try {
-            logger.log(`Player ${this.playerId} becoming Survivor...`);
-
-            // Update internal state and maps immediately
-            this.team = InfectedTeam.SURVIVORS;
-            gameState.survivors.set(this.playerId, this);
-            gameState.infected.delete(this.playerId);
+            if (alreadySurvivor) {
+                logger.log(`Player ${this.playerId} already Survivor, refreshing state`);
+            } else {
+                logger.log(`Player ${this.playerId} becoming Survivor...`);
+            }
 
             // Ensure team in game engine
             await this.ensureTeam(InfectedTeam.SURVIVORS);
@@ -448,12 +455,6 @@ class InfectionPlayer {
             } catch (error) {
                 logger.log(`Warning: Failed to enforce loadout for player ${this.playerId}: ${error}`);
             }
-
-            // Reset stats for new round
-            this.timeAlive = 0;
-            this.eliminations = 0;
-            this.infections = 0;
-            this.damageDealt = 0;
 
             logger.log(`Player ${this.playerId} is now a Survivor!`);
         } catch (error) {
