@@ -309,6 +309,8 @@ class InfectionPlayer {
             await mod.Wait(1);
             if (!gameState.gameStarted) continue;
             if (!mod.IsPlayerValid(this.player)) continue;
+            // Only restrict loadouts when player is actually deployed, not in deploy screen
+            if (!this.isDeployed) continue;
 
             LoadoutManager.restrictWeapons(this)
             LoadoutManager.restrictGadgets(this)
@@ -316,44 +318,75 @@ class InfectionPlayer {
     }
 
     async becomeInfected() {
-        this.team = InfectedTeam.INFECTED;
+        logger.log(`Player ${this.playerId} becoming Infected...`)
 
-        if (this.isDeployed) {
+        // Undeploy first if deployed
+        const wasDeployed = this.isDeployed;
+        if (wasDeployed) {
             mod.UndeployPlayer(this.player)
             await mod.Wait(0.5)
         }
 
-        if (mod.GetObjId(mod.GetTeam(this.player)) !== this.team) {
-            mod.SetTeam(this.player, mod.GetTeam(this.team))
+        // Update internal state
+        this.team = InfectedTeam.INFECTED;
+
+        // Set the team in the game engine
+        const targetTeam = mod.GetTeam(this.team);
+        const currentTeam = mod.GetTeam(this.player);
+
+        if (mod.GetObjId(currentTeam) !== this.team) {
+            mod.SetTeam(this.player, targetTeam);
+            await mod.Wait(0.1); // Small delay to ensure team switch completes
+            logger.log(`Player ${this.playerId} team switched from ${mod.GetObjId(currentTeam)} to ${this.team}`);
         }
 
+        // Update game state maps
         gameState.infected.set(this.playerId, this);
         gameState.survivors.delete(this.playerId);
 
-        // mod.DeployPlayer(this.player)
+        // Clear all equipment when switching to infected (they'll get knife on next deploy)
+        if (wasDeployed) {
+            LoadoutManager.clearAllEquipment(this);
+        }
 
-        logger.log(`Player ${this.playerId} initialized as Infected!`)
+        // Note: Don't reset stats here - player keeps their accumulated stats from being a survivor
+
+        logger.log(`Player ${this.playerId} is now Infected!`)
     }
 
     async becomeSurvivor() {
-        this.team = InfectedTeam.SURVIVORS;
+        logger.log(`Player ${this.playerId} becoming Survivor...`)
 
+        // Undeploy first if deployed
         if (this.isDeployed) {
             mod.UndeployPlayer(this.player)
             await mod.Wait(0.5)
         }
 
-        if (mod.GetObjId(mod.GetTeam(this.player)) !== this.team) {
-            mod.SetTeam(this.player, mod.GetTeam(this.team))
+        // Update internal state
+        this.team = InfectedTeam.SURVIVORS;
+
+        // Set the team in the game engine
+        const targetTeam = mod.GetTeam(this.team);
+        const currentTeam = mod.GetTeam(this.player);
+
+        if (mod.GetObjId(currentTeam) !== this.team) {
+            mod.SetTeam(this.player, targetTeam);
+            await mod.Wait(0.1); // Small delay to ensure team switch completes
+            logger.log(`Player ${this.playerId} team switched from ${mod.GetObjId(currentTeam)} to ${this.team}`);
         }
 
+        // Update game state maps
         gameState.survivors.set(this.playerId, this);
         gameState.infected.delete(this.playerId);
 
-        // mod.DeployPlayer(this.player)
-        // mod.SetPlayerMovementSpeedMultiplier(this.player, 1.1)
+        // Reset stats for new round
+        this.timeAlive = 0;
+        this.eliminations = 0;
+        this.infections = 0;
+        this.damageDealt = 0;
 
-        logger.log(`Player ${this.playerId} initialized as Survivor!`)
+        logger.log(`Player ${this.playerId} is now a Survivor!`)
     }
 }
 
@@ -406,6 +439,26 @@ class LoadoutManager {
         }
 
         logger.log(`Gave ${player.team === InfectedTeam.INFECTED ? "Infected" : "Survivor"} loadout to ${player.playerId}`);
+    }
+
+    static clearAllEquipment(player: InfectionPlayer) {
+        // Remove all weapons
+        const allWeapons = this.enumValues(mod.Weapons);
+        for (const weapon of allWeapons) {
+            if (mod.HasEquipment(player.player, weapon)) {
+                mod.RemoveEquipment(player.player, weapon);
+            }
+        }
+
+        // Remove all gadgets except what's allowed for infected
+        const allGadgets = this.enumValues(mod.Gadgets);
+        for (const gadget of allGadgets) {
+            if (mod.HasEquipment(player.player, gadget) && !this.allowedGadgetsInfected.includes(gadget)) {
+                mod.RemoveEquipment(player.player, gadget);
+            }
+        }
+
+        logger.log(`Cleared equipment for player ${player.playerId}`);
     }
 }
 
