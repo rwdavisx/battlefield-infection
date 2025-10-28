@@ -174,12 +174,14 @@ export async function OnGameModeStarted() {
 }
 
 export async function OnPlayerJoinGame(eventPlayer: mod.Player) {
+    await mod.Wait(1)
     await gameState.initializePlayer(eventPlayer);
 }
 
 export async function OnSpawnerSpawned(eventPlayer: mod.Player, eventSpawner: mod.Spawner) {
+    await mod.Wait(1)
     await gameState.initializePlayer(eventPlayer);
-    console.log(`Spawned bot ${mod.GetObjId(eventPlayer)}`);
+    logger.log(`Spawned bot ${mod.GetObjId(eventPlayer)}`);
 }
 
 export function OnPlayerLeaveGame(eventNumber: number) {
@@ -196,6 +198,10 @@ export function OnPlayerLeaveGame(eventNumber: number) {
 export async function OnPlayerDeployed(eventPlayer: mod.Player) {
     const p = gameState.players.get(mod.GetObjId(eventPlayer));
     if (!p) return;
+
+    await mod.Wait(1)
+
+    if (p.initializing) mod.EnableAllInputRestrictions(p.player, true)
 
     p.isDeployed = true;
     p.health = p.currentHealth;  // Initialize health when player deploys
@@ -303,6 +309,7 @@ export function OnPlayerDamaged(
 class InfectionPlayer {
     player: mod.Player;
     playerId: number;
+    initializing: boolean = true;
     team: InfectedTeam = InfectedTeam.SURVIVORS
     perks: PlayerPerks;
     isDeployed: boolean = false;
@@ -416,7 +423,7 @@ class InfectionPlayer {
     }
 
     async becomeSurvivor() {
-        const alreadySurvivor = this.team === InfectedTeam.SURVIVORS;
+        const alreadySurvivor = gameState.survivors.has(this.playerId)
 
         // Update internal state and maps immediately so survivor roster is always accurate
         this.team = InfectedTeam.SURVIVORS;
@@ -1145,6 +1152,8 @@ class PreRoundPhase extends GamePhase {
         // Reset teams
         this.game.survivors.clear();
         this.game.infected.clear();
+        if (DEV_BUILD.ENABLED) await gameState.removeAI()
+        if (DEV_BUILD.ENABLED) await gameState.spawnAI()
 
         // Assign all players to survivors (await each to prevent race conditions)
         for (const player of this.game.players.values()) {
@@ -1393,8 +1402,6 @@ class InfectionGameState {
         mod.SetSpawnMode(mod.SpawnModes.Deploy)
         scoreboard.initScoreboard()
 
-        if (DEV_BUILD.ENABLED) this.spawnAI()
-
         this.mainGameLoop();
         scoreboard.scoreboardLoop();
         this.loadoutGuardLoop();
@@ -1420,8 +1427,16 @@ class InfectionGameState {
 
     async spawnAI() {
         for (let i = 0; i < DEV_BUILD.BOTS; i++) {
-            mod.SpawnAIFromAISpawner(mod.GetSpawner(DEV_BUILD.SPAWNER_ID), mod.SoldierClass.Recon, mod.GetTeam(1))
+            mod.SpawnAIFromAISpawner(mod.GetSpawner(DEV_BUILD.SPAWNER_ID), mod.SoldierClass.Recon, mod.GetTeam(InfectedTeam.SURVIVORS))
             await mod.Wait(0.1)
+        }
+    }
+
+    async removeAI() {
+        for (const p of gameState.players.values()) {
+            if(p.isAIPlayer) {
+                mod.Kill(p.player)
+            }
         }
     }
 
@@ -1454,17 +1469,18 @@ class InfectionGameState {
         // Initialize player (sets redeploy time, no longer starts loadout loop)
         player.initialize();
 
-        // Assign to team based on game state (await to prevent race conditions)
-        if (this.gameStarted) {
-            if (this.matchStatus === MatchStatus.IN_PROGRESS || this.matchStatus === MatchStatus.ROUND_END) {
-                logger.log(`Player ${player.playerId} joined mid-game, assigning to Infected team`);
-                await player.becomeInfected();
-            } else {
-                logger.log(`Player ${player.playerId} joined during ${MatchStatus[this.matchStatus]}, assigning to Survivors team`);
-                await player.becomeSurvivor();
-            }
+        // Assign to team based on game state
+        if (this.matchStatus === MatchStatus.IN_PROGRESS || this.matchStatus === MatchStatus.ROUND_END) {
+            logger.log(`Player ${player.playerId} joined mid-game, assigning to Infected team`);
+            await player.becomeInfected();
         } else {
-            logger.log(`Player ${player.playerId} joined before game started`);
+            logger.log(`Player ${player.playerId} joined during ${MatchStatus[this.matchStatus]}, assigning to Survivors team`);
+            await player.becomeSurvivor();
+        }
+
+        if (player.initializing) {
+            mod.EnableAllInputRestrictions(eventPlayer, false)
+            player.initializing = false
         }
     }
 
