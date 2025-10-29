@@ -1,8 +1,8 @@
 import * as modlib from 'modlib';
 
 const DEV_BUILD = {
-    ENABLED: true,
-    BOTS: 5,
+    ENABLED: false,
+    BOTS: 63,
     SPAWNER_ID: 101
 }
 
@@ -11,9 +11,9 @@ const INFECTION_CFG = {
         MINIMUM_PLAYERS: 2,
         INITIAL_INFECTED_COUNT: 1,
         NUM_OF_ROUNDS: 5,
-        PRE_ROUND_SECONDS: 5,
-        COUNTDOWN_SECONDS: 10,
-        ROUND_SECONDS: 300,
+        PRE_ROUND_SECONDS: 30,
+        COUNTDOWN_SECONDS: 30,
+        ROUND_SECONDS: 60 * 8,
         ROUND_END_SECONDS: 15
     },
     SCORING: {
@@ -23,7 +23,7 @@ const INFECTION_CFG = {
         DAMAGE_DIVISOR: 10,               // 1 point per 10 damage dealt
     },
     PERFORMANCE: {
-        LOADOUT_CHECK_INTERVAL: 1,       // Seconds between loadout restriction checks
+        LOADOUT_CHECK_INTERVAL: 0.25,       // Seconds between loadout restriction checks
         SCOREBOARD_UPDATE_INTERVAL: 1,   // Seconds between scoreboard updates
         MAIN_LOOP_INTERVAL: 0.25,        // Seconds between main loop iterations
     },
@@ -206,9 +206,8 @@ export async function OnPlayerDeployed(eventPlayer: mod.Player) {
     p.isDeployed = true;
     p.health = p.currentHealth;  // Initialize health when player deploys
 
-    // Initial loadout enforcement is handled by centralized loadoutGuardLoop
-    // But we call it once here for immediate enforcement
-    LoadoutManager.enforce(p);
+    // if (p.team === InfectedTeam.SURVIVORS) LoadoutManager.limitSurvivorGadgets(p)
+    if (p.team === InfectedTeam.INFECTED) LoadoutManager.giveInfectedKit(p)
 
     logger.log(`Player ${mod.GetObjId(eventPlayer)} deployed with ${p.health} health`)
 }
@@ -402,14 +401,6 @@ class InfectionPlayer {
                     logger.log(`Warning: Failed to undeploy player ${this.playerId}: ${error}`);
                 }
             }
-
-            // Enforce loadout (remove disallowed, ensure baseline)
-            try {
-                LoadoutManager.enforce(this);
-            } catch (error) {
-                logger.log(`Warning: Failed to enforce loadout for player ${this.playerId}: ${error}`);
-            }
-
             // Note: Don't reset stats - player keeps accumulated stats from being a survivor
 
             logger.log(`Player ${this.playerId} is now Infected!`);
@@ -456,13 +447,6 @@ class InfectionPlayer {
                 }
             }
 
-            // Enforce loadout (remove disallowed, ensure baseline)
-            try {
-                LoadoutManager.enforce(this);
-            } catch (error) {
-                logger.log(`Warning: Failed to enforce loadout for player ${this.playerId}: ${error}`);
-            }
-
             logger.log(`Player ${this.playerId} is now a Survivor!`);
         } catch (error) {
             logger.log(`Critical error in becomeSurvivor for player ${this.playerId}: ${error}`);
@@ -489,22 +473,23 @@ class LoadoutManager {
     private static allowedGadgetsInfectedSet: Set<mod.Gadgets> | null = null;
     private static allowedGadgetsSurvivorsSet: Set<mod.Gadgets> | null = null;
 
-    private static enumValues<E extends Record<string, string | number>>(e: E): (E[keyof E])[] {
-        return Object.values(e).filter((v) => typeof v === "number") as (E[keyof E])[];
+    private static enumValues<E extends Record<string, any>>(e: E): (E[keyof E])[] {
+        // Works for both string and numeric enums/constant objects
+        return Object.values(e) as (E[keyof E])[];
     }
 
     private static getAllWeapons(): mod.Weapons[] {
         if (!this.allWeaponsCache) {
-            this.allWeaponsCache = this.enumValues(mod.Weapons);
+            this.allWeaponsCache = this.enumValues(mod.Weapons) as mod.Weapons[];
         }
-        return this.allWeaponsCache;
+        return this.allWeaponsCache!;
     }
 
     private static getAllGadgets(): mod.Gadgets[] {
         if (!this.allGadgetsCache) {
-            this.allGadgetsCache = this.enumValues(mod.Gadgets);
+            this.allGadgetsCache = this.enumValues(mod.Gadgets) as mod.Gadgets[];
         }
-        return this.allGadgetsCache;
+        return this.allGadgetsCache!;
     }
 
     private static getAllowedWeaponsSet(team: InfectedTeam): Set<mod.Weapons> {
@@ -569,63 +554,45 @@ class LoadoutManager {
 
         this.restrictWeapons(player);
         this.restrictGadgets(player);
-        this.ensureBaseline(player);
     }
 
-    // Ensure player has minimum required equipment
-    private static ensureBaseline(player: InfectionPlayer): void {
-        if (player.team === InfectedTeam.INFECTED) {
-            // Strip any remaining firearms from the infected player's inventory
-            try {
-                mod.RemoveEquipment(player.player, mod.InventorySlots.PrimaryWeapon);
-                mod.RemoveEquipment(player.player, mod.InventorySlots.SecondaryWeapon);
-            } catch (error) {
-                logger.log(`Warning: Failed to clear firearms for infected player ${player.playerId}: ${error}`);
-            }
-
-            // Infected must have combat knife
-            if (!mod.HasEquipment(player.player, mod.Gadgets.Melee_Combat_Knife)) {
-                mod.AddEquipment(player.player, mod.Gadgets.Melee_Combat_Knife);
-                logger.log(`Gave Combat Knife to infected player ${player.playerId}`);
-            }
-
-            // Infected must have throwing knives with ammo
-            if (!mod.HasEquipment(player.player, mod.Gadgets.Throwable_Throwing_Knife)) {
-                mod.AddEquipment(player.player, mod.Gadgets.Throwable_Throwing_Knife);
-                mod.SetInventoryAmmo(player.player, mod.InventorySlots.Throwable, this.infectedThrowableKnives);
-                logger.log(`Gave Throwing Knives to infected player ${player.playerId}`);
-            }
-
-            // Force the infected player to equip their melee weapon after stripping guns
-            try {
-                mod.ForceSwitchInventory(player.player, mod.InventorySlots.MeleeWeapon);
-            } catch (error) {
-                logger.log(`Warning: Failed to force melee weapon for infected player ${player.playerId}: ${error}`);
-            }
-        } else {
-            // Survivors must have at least one allowed weapon
-            if (!this.hasAnyAllowedWeapon(player, this.allowedWeaponsSurvivors)) {
-                // Validate config has weapons defined
-                if (this.allowedWeaponsSurvivors.length === 0) {
-                    logger.log(`Error: No allowed weapons configured for survivors!`);
-                    return;
-                }
-                // Give them the first allowed weapon (default loadout)
-                mod.AddEquipment(player.player, this.allowedWeaponsSurvivors[0]);
-                logger.log(`Gave default weapon to survivor ${player.playerId}`);
-            }
+    static giveInfectedKit(player: InfectionPlayer): void {
+        if (!mod.IsPlayerValid(player.player) || !player.isDeployed) {
+            return;
         }
+
+        mod.AddEquipment(player.player, mod.Gadgets.Throwable_Throwing_Knife)
+        mod.SetInventoryMagazineAmmo(player.player, mod.InventorySlots.Throwable, this.infectedThrowableKnives)
     }
 
-    // Check if player has any weapon from the allowed list
-    private static hasAnyAllowedWeapon(player: InfectionPlayer, allowedList: mod.Weapons[]): boolean {
-        for (const weapon of allowedList) {
-            if (mod.HasEquipment(player.player, weapon)) {
-                return true;
-            }
-        }
-        return false;
-    }
+    //TODO - limit stuff, disable unlimited ammo in portal UI, enable via code
+
+    // static limitSurvivorGadgets(player: InfectionPlayer): void {
+    //     if (!mod.IsPlayerValid(player.player) || !player.isDeployed) {
+    //         return;
+    //     }
+
+    //     const limitedGadgets = [
+    //         mod.Gadgets.Throwable_Anti_Vehicle_Grenade,
+    //         mod.Gadgets.Throwable_Flash_Grenade,
+    //         mod.Gadgets.Throwable_Fragmentation_Grenade,
+    //         mod.Gadgets.Throwable_Incendiary_Grenade,
+    //         mod.Gadgets.Throwable_Mini_Frag_Grenade,
+    //         mod.Gadgets.Throwable_Proximity_Detector,
+    //         mod.Gadgets.Throwable_Smoke_Grenade,
+    //         mod.Gadgets.Throwable_Stun_Grenade,
+    //         mod.Gadgets.Throwable_Throwing_Knife,
+    //     ]
+
+    //     limitedGadgets.forEach(g => {
+    //         if (mod.HasEquipment(player.player, g)) {
+    //             mod.RemoveEquipment(player.player, mod.InventorySlots.Throwable)
+    //             mod.AddEquipment(player.player, g)
+    //             mod.SetInventoryAmmo(player.player, mod.InventorySlots.Throwable, 3)
+    //         }
+    //     })
+
+    // }
 }
 
 class ScoreboardManager {
@@ -1134,7 +1101,6 @@ class LobbyPhase extends GamePhase {
 
     onEnter(): void {
         super.onEnter();
-        mod.DisplayNotificationMessage(mod.Message("Waiting for players..."));
     }
 
     onUpdate(): void {
@@ -1162,12 +1128,15 @@ class PreRoundPhase extends GamePhase {
     async onEnter(): Promise<void> {
         super.onEnter();
         this.game.currentRound++;
-        mod.DisplayNotificationMessage(mod.Message("preRoundStart"));
+        mod.UndeployAllPlayers();
 
         // Reset teams
         this.game.survivors.clear();
         this.game.infected.clear();
-        if (DEV_BUILD.ENABLED) await gameState.spawnAI()
+
+        if (DEV_BUILD.ENABLED) {
+            await this.game.spawnAI()
+        }
 
         // Assign all players to survivors (await each to prevent race conditions)
         for (const player of this.game.players.values()) {
@@ -1193,7 +1162,6 @@ class CountdownPhase extends GamePhase {
 
     onEnter(): void {
         super.onEnter();
-        mod.DisplayNotificationMessage(mod.Message("countdownStart"));
     }
 
     onUpdate(): void {
@@ -1213,7 +1181,6 @@ class InProgressPhase extends GamePhase {
     async onEnter(): Promise<void> {
         super.onEnter();
         mod.DeployAllPlayers();
-        mod.DisplayNotificationMessage(mod.Message("inProgressStart"));
         await this.setupFirstInfected();
     }
 
@@ -1226,7 +1193,11 @@ class InProgressPhase extends GamePhase {
     }
 
     checkTransition(): MatchStatus | null {
-        // Check win condition first (immediate transition)
+
+        if (this.game.infected.size <= 0) {
+            this.setupFirstInfected();
+        }
+
         if (this.game.survivors.size <= 0) {
             return MatchStatus.ROUND_END;
         }
@@ -1304,7 +1275,9 @@ class RoundEndPhase extends GamePhase {
             return MatchStatus.GAME_END;
         }
 
-        // if (DEV_BUILD.ENABLED) await gameState.removeAI()
+        if (DEV_BUILD.ENABLED) {
+            this.game.removeAI()
+        }
 
         return MatchStatus.PRE_ROUND;
     }
@@ -1498,17 +1471,12 @@ class InfectionGameState {
         }
     }
 
-    async removeAI() {
-        for (const p of gameState.players.values()) {
-            if (p.isAIPlayer) {
-                mod.Kill(p.player)
-                await mod.Wait(0.1)
-            }
-        }
+    removeAI() {
+        mod.UnspawnAllAIsFromAISpawner(mod.GetSpawner(DEV_BUILD.SPAWNER_ID))
     }
 
     updateUI() {
-        this.InfectedCountUI.Update(gameState.survivors.size, gameState.infected.size);
+        this.InfectedCountUI.Update(this.survivors.size, this.infected.size);
         this.InfectedTimerUI.Update();
         this.InfectedRoundPhaseUI.Update();
     }
@@ -1638,13 +1606,8 @@ const logger = DebugLog.Logger
 
 // MORE SPAWNS (4)
 
-// ALLOW PICKING GUNS (2)
 // DISCORD LINK
 // ALPHA ZOMBIE
 // lAST SURVIVOR
-// fIX WHO WINS
 
-// Add round counter
-// Add match status UI
-// add loop to handle if players leave
-// look into kits not being available on different teams
+// dont add score until game starts
